@@ -1,0 +1,135 @@
+/* BerichtKit – Word-Datei aus dem Berichtsmodell (bericht-text.js) mit docx (MIT, vendor/docx.iife.js).
+   Format wie die Berichte des Büros (Spezifikation „bericht-format-spec“): A4, Arial 12, Zeilenabstand 1,5, Blocksatz,
+   Deckblatt mit großem Logo und Adressblock, Folgeseiten mit kleinem Logo, „Seite X von Y“ und vier Kopfzeilen (9 pt),
+   Überschriften nummeriert und unterstrichen, Bildunterschrift „Abb. n“ (11 pt kursiv), Lücken gelb markiert.
+   bilder = { logoSvg:Uint8Array, logoPng:Uint8Array, sig:{<Kürzel>:{data,w,h}}, fotos:{<Label>:{data,w,h}} } */
+(function (root) {
+'use strict';
+
+function erstellen(D, m, bilder) {
+  const { Document, Paragraph, TextRun, ImageRun, Header, Table, TableRow, TableCell, WidthType, BorderStyle, AlignmentType,
+    TabStopType, PageNumber, ShadingType, HorizontalPositionRelativeFrom, VerticalPositionRelativeFrom, TextWrappingType,
+    SectionType, VerticalAlign, UnderlineType } = D;
+  const FONT = 'Arial';
+  const cmPx = cm => cm / 2.54 * 96, cmEmu = cm => Math.round(cm * 360000);
+  const LINE15 = { line: 360, lineRule: 'auto' }, LINE1 = { line: 240, lineRule: 'auto' };
+  const B = 9070;                                   // Textbreite in twips (21 cm − 2 × 2,5 cm)
+
+  /* Runs: Text oder { gap } (gelb) */
+  const runs = (xs, o = {}) => (Array.isArray(xs) ? xs : [xs]).filter(x => x !== '' && x != null).map(x =>
+    x && typeof x === 'object' ? new TextRun({ text: x.gap, font: FONT, highlight: 'yellow', ...o }) : new TextRun({ text: String(x), font: FONT, ...o }));
+  const t = (text, o = {}) => new TextRun({ text, font: FONT, ...o });
+  const einfach = (children, o = {}) => new Paragraph({ children, spacing: { ...LINE1, after: 0 }, ...o });
+
+  /* Logo: SVG mit PNG-Ersatz (ältere Word-Versionen) */
+  const LOGO_RATIO = 103 / 393;
+  const logo = (wCm, xCm, yCm) => new ImageRun({
+    type: 'svg', data: bilder.logoSvg, fallback: { type: 'png', data: bilder.logoPng },
+    transformation: { width: cmPx(wCm), height: cmPx(wCm * LOGO_RATIO) },
+    floating: { horizontalPosition: { relative: HorizontalPositionRelativeFrom.COLUMN, offset: cmEmu(xCm) },
+      verticalPosition: { relative: VerticalPositionRelativeFrom.PARAGRAPH, offset: cmEmu(yCm) },
+      wrap: { type: TextWrappingType.NONE }, allowOverlap: true },
+    altText: { title: 'Logo', description: 'Dr. Heinz Schiffers & Partner', name: 'Logo' },
+  });
+
+  /* Kopf Deckblatt */
+  const ADR = 6381;
+  const adr = text => einfach([text ? t(text, { size: 16 }) : t('')], { indent: { left: ADR } });
+  const kopfDeckblatt = new Header({ children: [
+    new Paragraph({ children: [logo(11.6, -0.94, 0.33), t('Dr. Schiffers & Partner', { size: 16 })], indent: { left: ADR }, spacing: { ...LINE1, after: 0 } }),
+    adr('Gouleystr. 59'), adr('52146 Würselen'), adr('E-Mail: Dr.Schiffers@t-online.de'), adr('Tel: 02405-418 480'), adr('https://dr-schiffers.de'),
+    adr(''), adr('Sachverständige für'), adr('die chemische Untersuchung von'), adr('Brandfolgeschäden'),
+    adr(''), adr('Sachverständige'), adr('für Schimmelpilzschäden in Innenräumen'),
+  ] });
+
+  /* Kopf Folgeseiten */
+  const k9 = r => einfach(runs(r, { size: 18 }));
+  const kopfFolge = new Header({ children: [
+    new Paragraph({ children: [logo(3.97, -0.26, -0.44), t('\t'), new TextRun({ font: FONT, children: ['Seite ', PageNumber.CURRENT, ' von ', PageNumber.TOTAL_PAGES] })],
+      tabStops: [{ type: TabStopType.RIGHT, position: B }], spacing: { ...LINE1, after: 0 } }),
+    einfach([t('')]), einfach([t('')]),
+    ...m.kopf.map(k9),
+  ] });
+
+  /* Deckblatt */
+  const TAB = 3960, d = m.deckblatt;
+  const deckblatt = [
+    new Paragraph({ children: [t(d.titel, { bold: true, italics: true, size: 28 })], spacing: { ...LINE15, before: 2760, after: 0 } }),
+    new Paragraph({ children: [t(`(${d.mitteilung})`, { bold: true, italics: true })], spacing: { ...LINE15, after: 600 } }),
+    einfach([t('Projektnummer:'), t('\t'), ...runs(d.projektnummer || { gap: '[Projektnummer]' })], { tabStops: [{ type: TabStopType.LEFT, position: TAB }], spacing: { ...LINE1, after: 360 } }),
+    einfach(runs(d.betreff), { spacing: { ...LINE1, after: 720 } }),
+  ];
+  d.felder.forEach(([label, zeilen], i) => zeilen.forEach((z, j) => deckblatt.push(einfach([t(j === 0 ? label : ''), t('\t'), ...runs(z)], {
+    tabStops: [{ type: TabStopType.LEFT, position: TAB }],
+    spacing: { ...LINE1, after: j === zeilen.length - 1 && !(label === 'Versicherer:' && i < d.felder.length - 1) ? 360 : 0 },
+  }))));
+
+  /* Abschnitte */
+  const NONE = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, duenn = { style: BorderStyle.SINGLE, size: 4, color: '808080' };
+  const ueberschrift = text => new Paragraph({ children: [t(text, { underline: { type: UnderlineType.SINGLE } })], spacing: { ...LINE15, before: 240, after: 240 }, keepNext: true, outlineLevel: 0 });
+  const absatz = r => new Paragraph({ children: runs(r), alignment: AlignmentType.JUSTIFIED, spacing: { ...LINE15, after: 240 } });
+  const SPALTEN = [950, 1950, 2270, 1850, 2050];
+  const zelle = (inhalt, w, kopf) => new TableCell({
+    width: { size: w, type: WidthType.DXA }, borders: { top: duenn, bottom: duenn, left: duenn, right: duenn },
+    shading: kopf ? { type: ShadingType.CLEAR, fill: 'EDEDED', color: 'auto' } : undefined,
+    margins: { top: 60, bottom: 60, left: 90, right: 90 }, verticalAlign: VerticalAlign.CENTER,
+    children: [new Paragraph({ spacing: { ...LINE1, after: 0 }, children: runs(inhalt === '' || inhalt == null ? '–' : inhalt, { size: 20, bold: !!kopf }) })],
+  });
+  const kinder = [];
+  for (const a of m.abschnitte) {
+    kinder.push(ueberschrift(a.titel));
+    for (const x of a.inhalt) {
+      if (x.t === 'p') kinder.push(absatz(x.runs));
+      else if (x.t === 'fig') {
+        const b = bilder.fotos && bilder.fotos[x.label];
+        if (b) {
+          const w = b.w >= b.h ? 10 : 6.5, h = w * b.h / b.w;
+          kinder.push(new Paragraph({ children: [new ImageRun({ type: 'jpg', data: b.data, transformation: { width: cmPx(w), height: cmPx(h) },
+            altText: { title: x.caption, description: x.caption, name: x.label } })], alignment: AlignmentType.CENTER, keepNext: true, spacing: { before: 120, after: 60 } }));
+        } else kinder.push(new Paragraph({ children: [t(`[Foto fehlt: ${x.datei}]`, { highlight: 'yellow' })], alignment: AlignmentType.CENTER, keepNext: true }));
+        kinder.push(new Paragraph({ children: [t(x.caption, { italics: true, size: 22 })], alignment: AlignmentType.CENTER, spacing: { ...LINE15, after: 240 } }));
+      } else if (x.t === 'tab') {
+        kinder.push(new Paragraph({ children: [t(x.caption, { italics: true, size: 22 })], keepNext: true, spacing: { ...LINE1, after: 120 } }));
+        kinder.push(new Table({ width: { size: B, type: WidthType.DXA }, columnWidths: SPALTEN,
+          rows: [new TableRow({ tableHeader: true, children: x.kopf.map((k, i) => zelle(k, SPALTEN[i], true)) }),
+            ...x.zeilen.map(z => new TableRow({ cantSplit: true, children: z.map((c, i) => zelle(c, SPALTEN[i], false)) }))] }));
+        kinder.push(new Paragraph({ children: [], spacing: { ...LINE1, after: 240 } }));
+      }
+    }
+  }
+
+  /* Ort/Datum, Unterschriften, Anlagen */
+  kinder.push(new Paragraph({ children: [t(m.ortDatum)], spacing: { ...LINE15, before: 240, after: 480 }, keepNext: true }));
+  const SIG_H = 1.74;   // einheitliche Bildhöhe → Unterschriftslinien auf gleicher Höhe
+  const sigZelle = u => {
+    const b = u.kuerzel && bilder.sig && bilder.sig[u.kuerzel];
+    const bild = b ? [new ImageRun({ type: 'png', data: b.data, transformation: { width: cmPx(Math.min(5, SIG_H * b.w / b.h)), height: cmPx(Math.min(5, SIG_H * b.w / b.h) * b.h / b.w) } })] : [];
+    return new TableCell({ width: { size: B / 2, type: WidthType.DXA }, borders: { top: NONE, bottom: NONE, left: NONE, right: NONE }, verticalAlign: VerticalAlign.BOTTOM,
+      children: [
+        new Paragraph({ children: bild, border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '000000', space: 1 } }, indent: { right: 900 },
+          spacing: b ? { ...LINE1, after: 60 } : { before: Math.round(SIG_H / 2.54 * 1440), after: 60 } }),
+        einfach(runs(u.rolle, { size: 22 })), einfach(runs(u.name, { size: 22 })),
+      ] });
+  };
+  const sig = m.unterschriften.map(sigZelle);
+  if (sig.length === 1) sig.push(new TableCell({ width: { size: B / 2, type: WidthType.DXA }, borders: { top: NONE, bottom: NONE, left: NONE, right: NONE }, children: [new Paragraph('')] }));
+  kinder.push(new Table({ width: { size: B, type: WidthType.DXA }, columnWidths: [B / 2, B / 2],
+    borders: { top: NONE, bottom: NONE, left: NONE, right: NONE, insideHorizontal: NONE, insideVertical: NONE },
+    rows: [new TableRow({ cantSplit: true, children: sig })] }));
+  m.anlagen.forEach((a, i) => kinder.push(einfach(runs(a), { spacing: { ...LINE1, before: i ? 0 : 960, after: 0 } })));
+
+  const seite = top => ({ size: { width: 11906, height: 16838 }, margin: { top, right: 1418, bottom: 1134, left: 1418, header: 720, footer: 720 } });
+  return new Document({
+    creator: 'Dr. Schiffers & Partner · BerichtKit', title: `${d.titel} (${d.mitteilung}) ${d.projektnummer || ''}`.trim(),
+    styles: { default: { document: { run: { font: FONT, size: 24 }, paragraph: { spacing: { after: 0 } } } } },
+    sections: [
+      { properties: { page: seite(2943), titlePage: true }, headers: { first: kopfDeckblatt, default: kopfFolge }, children: deckblatt },
+      { properties: { type: SectionType.NEXT_PAGE, page: seite(3594) }, headers: { default: kopfFolge }, children: kinder },
+    ],
+  });
+}
+
+const API = { erstellen };
+if (typeof module === 'object' && module.exports) module.exports = API;
+root.BerichtDocx = API;
+})(typeof globalThis !== 'undefined' ? globalThis : this);

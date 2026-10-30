@@ -1,0 +1,304 @@
+/* BerichtKit – Textbausteine und Berichtsmodell (ohne Browserteile, in Node testbar).
+   Grundlage: Doc „Textbausteine Asbest-Untersuchungsbericht“ (Stand 30.10.2026).
+   Regeln: Laborwerte und Probenbezeichnungen kommen unverändert aus ResultKit (_Ergebnisse.json) und LabelKit –
+   hier wird nichts umgerechnet oder umformuliert. Fehlende Angaben werden als [Lücke] markiert (gelb im Bericht),
+   nie erfunden. Materialnamen stehen nur im Nominativ (in Anführungszeichen oder hinter Doppelpunkt). */
+(function (root) {
+'use strict';
+
+/* ---------- kleine Helfer ---------- */
+const s = v => (v == null ? '' : String(v)).trim();
+const ZAHLWORT = ['', 'eine', 'zwei', 'drei', 'vier', 'fünf', 'sechs', 'sieben', 'acht', 'neun', 'zehn', 'elf', 'zwölf'];
+const zahlwort = n => (n >= 1 && n <= 12 ? ZAHLWORT[n] : String(n));
+/** ISO JJJJ-MM-TT → TT.MM.JJJJ; schon deutsches Datum bleibt. */
+function datumDE(v) {
+  const t = s(v); let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t);
+  if (m) return `${m[3]}.${m[2]}.${m[1]}`;
+  m = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(t);
+  return m ? `${m[1].padStart(2, '0')}.${m[2].padStart(2, '0')}.${m[3]}` : t;
+}
+/** Aufzählung „A“, „A und B“, „A, B und C“ */
+function liste(xs) { xs = xs.filter(Boolean); return xs.length < 2 ? (xs[0] || '') : xs.slice(0, -1).join(', ') + ' und ' + xs[xs.length - 1]; }
+/** Lücke: Wert oder markierte Platzhalter-Lücke */
+const L = (wert, name) => (s(wert) ? s(wert) : { gap: `[${name}]` });
+/** Zeilen einer Adress-Zeichenkette „Name, Straße, PLZ Ort“ */
+function zeilen(v) { return s(v).split(/\s*[\n;]\s*|,\s+/).map(x => x.trim()).filter(Boolean); }
+/** Erste Zeile (Name) */
+const nameVon = v => zeilen(v)[0] || '';
+const PNR = v => { const m = /(\d+)\s*$/.exec(s(v)); return m ? +m[1] : null; };
+
+/* ---------- Asbest-Befund (Logik wie ResultKit asbestBefund, src/uebersicht.ts – Trenner im Bericht „, “) ---------- */
+const ASBEST = /asbest|chrysotil|amosit|krokydolith|tremolit|aktinolith|anthophyllit/i;
+const POSITIV = /nachgewiesen|positiv|enthalten|gefunden|^ja$|chrysotil|amosit|krokydolith|tremolit|aktinolith|anthophyllit/i;
+const NEGATIV = /nicht|kein|negativ|n\.\s*n\.|^<|unter/i;
+const GEHALT = /^asbestgehalt\b/i, ART = /^asbest(?:art)?\b/i;
+const gehaltPositiv = w => GEHALT.test(s(w.p)) && /\d/.test(w.r) && !/^\s*</.test(w.r) && !NEGATIV.test(s(w.r));
+function asbestBefund(werte) {
+  const a = (werte || []).filter(w => ASBEST.test(w.p || '') && !/^[-–—]?$/.test(s(w.r)));
+  if (!a.length) return null;
+  const teil = w => GEHALT.test(s(w.p)) ? `${s(w.r)}${s(w.u) && /\d/.test(w.r) ? ` ${s(w.u)}` : ''}`
+    : ART.test(s(w.p)) ? s(w.r) : `${s(w.p)}: ${s(w.r)}`;
+  const sortiert = [...a.filter(w => !GEHALT.test(s(w.p))), ...a.filter(w => GEHALT.test(s(w.p)))];
+  const text = [...new Set(sortiert.map(teil))].join(', ');
+  const gefunden = a.some(w => (POSITIV.test(s(w.r)) && !NEGATIV.test(s(w.r))) || gehaltPositiv(w));
+  const negativ = !gefunden && a.every(w => NEGATIV.test(s(w.r)) || /^[-–—]?$/.test(s(w.r)));
+  return { text, gefunden, eindeutig: gefunden || negativ };
+}
+/** KMF-Angaben aus den Laborwerten (ResultKit liest sie als normale Werte) */
+const KI = /\bKI\b|kanzerogenit/i, WHO = /WHO|mineralfaser|\bKMF\b/i;
+function kmfWerte(werte) {
+  const ki = (werte || []).find(w => KI.test(w.p || '') && s(w.r) && !/^[-–—]$/.test(s(w.r)));
+  const who = (werte || []).find(w => WHO.test(w.p || '') && !KI.test(w.p || '') && s(w.r) && !/^[-–—]$/.test(s(w.r)));
+  return { ki: ki ? s(ki.r) : '', who: who ? `${s(who.p)}: ${s(who.r)}${s(who.u) ? ' ' + s(who.u) : ''}` : '',
+    whoPositiv: who ? (POSITIV.test(s(who.r)) || (/\d/.test(who.r) && !NEGATIV.test(s(who.r)))) && !NEGATIV.test(s(who.r)) : null };
+}
+const IST_KMF = /KMF|mineralwolle|glaswolle|steinwolle|dämm|daemm|mineralfaser/i;
+
+/* ---------- Personen ---------- */
+const TITEL = /^(?:Dr\.|Prof\.|Dipl\.-\S+|M\.\s?Sc\.|B\.\s?Sc\.|M\.|Sc\.)$/;
+/** „Dr. Ricarda Pütt“ → {titel:'Dr.', nachname:'Pütt'}; „Lucas vom Dorp“ → nachname „vom Dorp“ */
+function namensteile(name) {
+  const w = s(name).split(/\s+/).filter(Boolean); const titel = [];
+  while (w.length > 1 && TITEL.test(w[0])) titel.push(w.shift());
+  const nachname = w.length > 1 ? w.slice(1).join(' ') : (w[0] || '');
+  return { titel: titel.filter(t => /^(Dr\.|Prof\.)$/.test(t)).join(' '), nachname };
+}
+/** Person für Bericht: {kuerzel, name, rolle:'sv'|'mt', geschlecht:'w'|'m'|'', satz} */
+function person(cfg, mitarbeiter, kuerzel) {
+  const k = s(kuerzel); if (!k) return null;
+  const ma = (mitarbeiter || []).find(p => s(p.ordnerKuerzel).toLowerCase() === k.toLowerCase()) || {};
+  const c = ((cfg && cfg.personen) || {})[k] || {};
+  const name = s(c.name) || s(ma.name) || k;
+  const g = c.geschlecht === 'w' || c.geschlecht === 'm' ? c.geschlecht : '';
+  const t = namensteile(name);
+  const satz = s(c.satz) || (g ? `${g === 'w' ? 'Frau' : 'Herrn'} ${t.titel ? t.titel + ' ' : ''}${t.nachname}` : name);
+  return { kuerzel: k, name, rolle: c.rolle === 'mt' ? 'mt' : 'sv', geschlecht: g, satz };
+}
+function rollentext(p) {
+  if (p.rolle === 'mt') return p.geschlecht === 'w' ? 'Die Messtechnikerin' : 'Der Messtechniker';
+  return p.geschlecht === 'w' ? 'Die Sachverständige' : p.geschlecht === 'm' ? 'Der Sachverständige' : 'Sachverständige(r)';
+}
+
+/* ---------- Proben zusammenführen ---------- */
+/** LabelKit-Asbestproben nach Label „P<n>“ (Nummer wie LabelKit: _nr, sonst id) */
+function labelkitAsbest(lk) {
+  const m = new Map();
+  for (const p of (lk && Array.isArray(lk.asbestProben) ? lk.asbestProben : [])) {
+    const n = p._nr != null && p._nr !== '' ? +p._nr : +p.id; if (!n) continue;
+    m.set('P' + n, { nr: n, datum: s(p.datum), stelle: s(p.z2), material: s(p.z3), matrix: s(p.matrix) });
+  }
+  return m;
+}
+/** Alle Proben mit Asbest- oder KMF-Ergebnis aus _Ergebnisse.json, angereichert mit LabelKit. */
+function probenSammeln(erg, lk) {
+  const lkm = labelkitAsbest(lk), out = [], gesehen = new Set();
+  const berichte = erg && Array.isArray(erg.berichte) ? erg.berichte : [];
+  for (const b of berichte) for (const p of (b.proben || [])) {
+    const werte = p.werte || [];
+    const befund = asbestBefund(werte), kmf = kmfWerte(werte);
+    if (!(p.typ === 'Asbest' || befund || kmf.ki || kmf.who)) continue;
+    const label = s(p.label) || (PNR(p.ref) ? 'P' + PNR(p.ref) : s(p.ref));
+    if (gesehen.has(label + '|' + b.bericht)) continue; gesehen.add(label + '|' + b.bericht);
+    const l = lkm.get(label) || {};
+    out.push({ label, nr: l.nr || PNR(p.ref) || PNR(label), ref: s(p.ref), labNr: s(p.labNr), bericht: s(b.bericht || p.bericht),
+      stelle: l.stelle || s(p.raum) || '', material: l.material || '', matrix: l.matrix || s(p.art),
+      datum: l.datum || s(p.datum), befund, kmf, vorlaeufig: !!b.vorlaeufig });
+  }
+  out.sort((a, b) => (a.nr || 0) - (b.nr || 0));
+  const offen = [...lkm.keys()].filter(k => !out.some(p => p.label === k));
+  return { proben: out, offen };
+}
+
+/* ---------- Projektdaten ---------- */
+function projektSicht(pj, ordner) {
+  pj = pj || {};
+  const vn = s(pj.versicherungsnehmer), ag = s(pj.auftraggeber), objekt = s(pj.objekt);
+  const versicherungsfall = !!vn;
+  return { nr: s(pj.projektnummer) || s(ordner && ordner.nr), versicherungsfall, vn, ag, objekt,
+    schadennummer: s(pj.schadennummer), auftragsdatum: s(pj.auftragsdatum), zustaendig: s(pj.zustaendig && pj.zustaendig.kuerzel) || s(ordner && ordner.kuerzel),
+    sachverstaendiger: s(pj.sachverstaendiger) };
+}
+
+/* ---------- Berichtsmodell ----------
+   eingabe = { pj, ordner:{name,nr,kuerzel}, lk, erg, cfg, mitarbeiter, fotos:{label:[{datei,...}]},
+               form:{ datum, mitteilung, variante:'eigen'|'zugestellt', eingangsdatum, auftragsdatum, agSatz,
+                      probenahmedatum, probenehmer, sv, mt, labor, aus:{label:false}, kmf:{label:true}, who:{label:true},
+                      ki:{label:'25'}, foto:{label:'datei'|''}, einbau:'vor1996'|'unbekannt' } }
+   Ergebnis: { dateiname, deckblatt, kopf, abschnitte, unterschriften, anlagen, luecken[], hinweise[] } */
+function bericht(eingabe) {
+  const e = eingabe || {}, f = e.form || {}, P = projektSicht(e.pj, e.ordner);
+  const hinweise = [];
+  const { proben: alle, offen } = probenSammeln(e.erg, e.lk);
+  const proben = alle.filter(p => !(f.aus && f.aus[p.label] === false));
+  proben.forEach(p => {
+    p.istKmf = f.kmf && p.label in f.kmf ? !!f.kmf[p.label] : (IST_KMF.test(p.material + ' ' + p.matrix) || !!p.kmf.ki || !!p.kmf.who);
+    p.ki = p.kmf.ki || s(f.ki && f.ki[p.label]);
+    p.kiQuelle = p.kmf.ki ? 'labor' : (p.ki ? 'hand' : '');
+    p.whoNachgewiesen = f.who && p.label in f.who ? !!f.who[p.label] : !!p.kmf.whoPositiv;
+    p.foto = f.foto && p.label in f.foto ? f.foto[p.label] : ((e.fotos && e.fotos[p.label] && e.fotos[p.label][0] && e.fotos[p.label][0].datei) || '');
+    if (p.vorlaeufig) hinweise.push(`${p.ref || p.label}: Prüfbericht ${p.bericht} ist vorläufig.`);
+    if (p.befund && !p.befund.eindeutig) hinweise.push(`${p.ref || p.label}: Ergebnis „${p.befund.text}“ nicht eindeutig – bitte im Prüfbericht prüfen.`);
+    if (!p.material) hinweise.push(`${p.ref || p.label}: Material fehlt (LabelKit „Bauteil / Material“).`);
+    if (p.istKmf && !p.ki) hinweise.push(`${p.ref || p.label}: KI-Wert fehlt in den Labordaten – bitte aus dem Prüfbericht eintragen.`);
+  });
+  offen.forEach(l => hinweise.push(`${l}: in LabelKit als Asbestprobe erfasst, aber noch kein Ergebnis in ResultKit.`));
+  if (!proben.length) hinweise.push('Keine Asbestergebnisse gefunden – zuerst in ResultKit die Laborergebnisse übernehmen.');
+
+  const zugestellt = f.variante === 'zugestellt';
+  const n = proben.length, eine = n === 1;
+  const kmfProben = proben.filter(p => p.istKmf);
+  const pos = proben.filter(p => p.befund && p.befund.gefunden);
+  const neg = proben.filter(p => p.befund && !p.befund.gefunden && p.befund.eindeutig);
+  const unklar = proben.filter(p => !p.befund || !p.befund.eindeutig);
+  const labor = s(f.labor) || s(e.cfg && e.cfg.labor);
+  const berichtNr = [...new Set(proben.map(p => p.bericht).filter(Boolean))];
+  const datum = datumDE(f.datum);
+  const mitteilung = `${+f.mitteilung || 1}. Mitteilung`;
+
+  // Personen
+  const pn = person(e.cfg, e.mitarbeiter, f.probenehmer), sv = person(e.cfg, e.mitarbeiter, f.sv);
+  const mt = zugestellt ? null : person(e.cfg, e.mitarbeiter, f.mt);
+
+  // Betreff
+  const mitKmf = kmfProben.length > 0;
+  let betreff = mitKmf ? 'Untersuchung auf Asbest und künstliche Mineralfasern (KMF)' : 'Untersuchung auf Asbest';
+  const betreffRuns = [betreff];
+  if (zugestellt) betreffRuns.push(` – zugestellte ${eine ? 'Probe' : 'Proben'} vom `, L(datumDE(f.eingangsdatum), 'Eingangsdatum'));
+
+  // Deckblatt-Feldblock
+  const felder = [];
+  if (P.versicherungsfall) {
+    felder.push(['VN:', zeilen(P.vn)], ['Risiko:', zeilen(P.objekt)], ['Versicherer:', [nameVon(P.ag)].filter(Boolean)]);
+  } else {
+    felder.push(['Auftraggeber:', zeilen(P.ag)], ['Schadenort:', zeilen(P.objekt)]);
+  }
+  if (P.schadennummer) felder.push(['Schaden-Nr.:', [P.schadennummer]]);
+  felder.forEach(([k, v]) => { if (!v.length) v.push({ gap: `[${k.replace(':', '')}]` }); });
+
+  const kopf = [`Untersuchungsbericht vom ${datum}`, betreffRuns,
+    P.versicherungsfall ? ['VN: ', L(zeilen(P.vn).join(', '), 'VN')] : ['AG: ', L(zeilen(P.ag).join(', '), 'Auftraggeber')],
+    [P.versicherungsfall ? 'Risiko: ' : 'Schadenort: ', L(zeilen(P.objekt).join(', '), 'Objekt')]];
+
+  /* 1. Veranlassung */
+  const objekt = L(zeilen(P.objekt).join(', '), 'Objekt');
+  const agSatz = L(s(f.agSatz) || nameVon(P.ag), 'Auftraggeber');
+  const v = [];
+  if (!zugestellt) {
+    v.push({ t: 'p', runs: ['Am ', L(datumDE(f.auftragsdatum || P.auftragsdatum), 'Auftragsdatum'), ' wurde unser Büro durch ', agSatz,
+      ' beauftragt, im Objekt ', objekt, ' eine Ortsbesichtigung durchzuführen, Materialproben zu entnehmen und diese auf Asbest ',
+      mitKmf ? 'sowie künstliche Mineralfasern (KMF) ' : '', 'untersuchen zu lassen.'] });
+  } else {
+    v.push({ t: 'p', runs: ['Am ', L(datumDE(f.eingangsdatum), 'Eingangsdatum'), ' wurde unserem Büro durch ', agSatz, ' ',
+      eine ? 'eine Materialprobe' : `${zahlwort(n)} Materialproben`, ' aus dem Objekt ', objekt,
+      ' zugestellt, verbunden mit dem Auftrag, diese auf Asbest ', mitKmf ? 'sowie künstliche Mineralfasern (KMF) ' : '', 'untersuchen zu lassen.'] });
+    v.push({ t: 'p', runs: ['Die Probenahme erfolgte nicht durch unser Büro. Angaben zu Material und Entnahmestelle wurden vom Auftraggeber übernommen. ',
+      `Die Ergebnisse gelten ausschließlich für die zugestellte${eine ? ' Probe' : 'n Proben'}.`] });
+  }
+
+  /* 2. Probenahme und Untersuchung */
+  const mitFoto = proben.filter(p => p.foto);
+  const abb = new Map(); mitFoto.forEach((p, i) => abb.set(p.label, i + 1));
+  const abbVerweis = !mitFoto.length ? '' : mitFoto.length === 1 ? 'Abbildung 1' : `den Abbildungen 1 bis ${mitFoto.length}`;
+  const pr = [];
+  if (!zugestellt) {
+    const daten = s(f.probenahmedatum) ? [datumDE(f.probenahmedatum)] : [...new Set(proben.map(p => datumDE(p.datum)).filter(Boolean))];
+    pr.push({ t: 'p', runs: ['Am ', daten.length ? liste(daten) : { gap: '[Probenahmedatum]' }, eine ? ' wurde durch ' : ' wurden durch ',
+      pn ? pn.satz : { gap: '[Probenehmer]' }, ' (Sachverständigenbüro Dr. Heinz Schiffers & Partner) im Objekt ',
+      eine ? 'eine Materialprobe' : `${zahlwort(n)} Materialproben`, ' entnommen. ',
+      eine ? 'Die Entnahmestelle ist in Tabelle 1 aufgeführt' : 'Die Entnahmestellen sind in Tabelle 1 aufgeführt',
+      abbVerweis ? ` und in ${abbVerweis} dokumentiert.` : '.'] });
+  } else if (abbVerweis) {
+    pr.push({ t: 'p', runs: [eine ? `Die zugestellte Probe ist in ${abbVerweis} dargestellt.` : `Die zugestellten Proben sind in ${abbVerweis} dargestellt.`] });
+  }
+  const nrText = berichtNr.length ? liste(berichtNr.map(x => 'Nr. ' + x)) : { gap: '[Prüfbericht-Nr.]' };
+  const anl = berichtNr.length <= 1 ? '(Anlage 1)' : berichtNr.length === 2 ? '(Anlagen 1 und 2)' : `(Anlagen 1 bis ${berichtNr.length})`;
+  pr.push({ t: 'p', runs: [eine ? 'Die Probe wurde der ' : 'Die Proben wurden der ', L(labor, 'Labor'), ' zur Untersuchung auf Asbest übergeben. ',
+    berichtNr.length > 1 ? 'Die Ergebnisse sind in den beigefügten Prüfberichten ' : 'Die Ergebnisse sind im beigefügten Prüfbericht ', nrText, ` dokumentiert ${anl}.`] });
+  if (mitKmf) pr.push({ t: 'p', runs: [kmfProben.length === 1 ? 'An der Dämmstoffprobe wurde' : 'An den Dämmstoffproben wurde',
+    ' zusätzlich untersucht, ob es sich um WHO-Fasern handelt, und der Kanzerogenitätsindex (KI) bestimmt.'] });
+  mitFoto.forEach(p => pr.push({ t: 'fig', label: p.label, datei: p.foto,
+    caption: `Abb. ${abb.get(p.label)}: ${p.material || p.ref}${p.stelle ? ', ' + p.stelle : ''}.` }));
+
+  /* 3. Befund */
+  const tab = { t: 'tab', caption: `Tabelle 1: ${zugestellt ? 'Zugestellte' : 'Entnommene'} ${eine ? 'Probe und Ergebnis' : 'Proben und Ergebnisse'}`,
+    kopf: ['Probe', 'Labor-Nr.', 'Entnahmestelle', 'Material', 'Ergebnis'],
+    zeilen: proben.map(p => [p.ref || p.label, p.labNr, p.stelle, p.material, p.befund ? p.befund.text : '–']) };
+  const bf = [tab];
+  if (pos.length === 0 && unklar.length === 0 && n) {
+    bf.push({ t: 'p', runs: [eine ? 'In der Probe wurde kein Asbest nachgewiesen (Tabelle 1).' : `In keiner der ${zahlwort(n)} Proben wurde Asbest nachgewiesen (Tabelle 1).`] });
+  } else {
+    pos.forEach(p => bf.push({ t: 'p', runs: [`In ${p.ref || 'Probe ' + p.nr} (Material: `, L(p.material, 'Material'), `) wurde Asbest nachgewiesen: ${p.befund.text}.`] }));
+    unklar.forEach(p => bf.push({ t: 'p', runs: [`Für ${p.ref || 'Probe ' + p.nr} (Material: `, L(p.material, 'Material'), `) weist der Prüfbericht aus: ${p.befund ? p.befund.text : '–'}.`] }));
+    if (neg.length) bf.push({ t: 'p', runs: [neg.length === 1 ? 'In der übrigen Probe wurde kein Asbest nachgewiesen.' : 'In den übrigen Proben wurde kein Asbest nachgewiesen.'] });
+  }
+  kmfProben.forEach(p => {
+    const txt = [p.whoNachgewiesen ? `In der Dämmstoffprobe (${p.ref || 'Probe ' + p.nr}) wurden WHO-Fasern nachgewiesen.`
+      : `In der Dämmstoffprobe (${p.ref || 'Probe ' + p.nr}) wurden keine WHO-Fasern nachgewiesen.`];
+    bf.push({ t: 'p', runs: [...txt, ' Der Prüfbericht weist einen Kanzerogenitätsindex von KI = ', L(p.ki, 'KI-Wert'), ' aus.'] });
+  });
+
+  /* 4. Schlussfolgerungen */
+  const sf = [];
+  const mat = p => ['„', L(p.material, 'Material'), `“ (${p.ref || 'Probe ' + p.nr})`];
+  if (pos.length === 0 && n) {
+    if (!unklar.length) sf.push({ t: 'p', runs: ['Bei ', eine ? 'dem untersuchten Material handelt es sich nicht um ein asbesthaltiges Material.' : 'den untersuchten Materialien handelt es sich nicht um asbesthaltige Materialien.'] });
+  } else if (pos.length) {
+    const r = pos.length === 1 ? ['Bei dem Material ', ...mat(pos[0]), ' handelt es sich um ein asbesthaltiges Material. ']
+      : ['Bei den Materialien ', ...pos.flatMap((p, i) => [...(i ? [i === pos.length - 1 ? ' und ' : ', '] : []), ...mat(p)]), ' handelt es sich um asbesthaltige Materialien. '];
+    r.push(`Bei allen Tätigkeiten, bei denen ${pos.length === 1 ? 'dieses Material' : 'diese Materialien'} bearbeitet, beschädigt oder entfernt ${pos.length === 1 ? 'wird' : 'werden'}, `,
+      'sind die Gefahrstoffverordnung (GefStoffV) und die TRGS 519 „Asbest: Abbruch-, Sanierungs- oder Instandhaltungsarbeiten“ einzuhalten. ',
+      'Die Arbeiten dürfen nur von Fachbetrieben mit der erforderlichen Sachkunde ausgeführt werden.');
+    sf.push({ t: 'p', runs: r });
+    if (neg.length) sf.push({ t: 'p', runs: [neg.length === 1 ? 'Bei dem übrigen untersuchten Material handelt es sich nicht um ein asbesthaltiges Material.'
+      : 'Bei den übrigen untersuchten Materialien handelt es sich nicht um asbesthaltige Materialien.'] });
+  }
+  if (unklar.length) sf.push({ t: 'p', runs: [{ gap: '[Schlussfolgerung für nicht eindeutige Ergebnisse ergänzen]' }] });
+  const kmfMitWho = kmfProben.filter(p => p.whoNachgewiesen);
+  if (kmfMitWho.length) {
+    sf.push({ t: 'p', runs: ['Nach der seit 05.06.2026 geltenden Fassung der TRGS 905 werden WHO-Fasern nicht mehr über den Kanzerogenitätsindex, ',
+      'sondern nach den Kategorien für krebserzeugende Stoffe in Anhang I der CLP-Verordnung bewertet. Der KI-Wert wird daher nur ergänzend angegeben. ',
+      'Maßgeblich für den Umgang mit dem Dämmstoff ist die TRGS 521 „Tätigkeiten mit alter Mineralwolle“.'] });
+    if (f.einbau === 'vor1996') sf.push({ t: 'p', runs: ['Der Dämmstoff wurde vor 1996 eingebaut und ist nach TRGS 521 als alte Mineralwolle anzusehen. ',
+      'Bei Ausbau, Demontage und Instandhaltung sind die Schutzmaßnahmen der TRGS 521 „Tätigkeiten mit alter Mineralwolle“ einzuhalten.'] });
+    else sf.push({ t: 'p', runs: ['Das Einbaujahr des Dämmstoffs ist nicht bekannt. Solange nicht belegt ist, dass es sich um neue Mineralwolle handelt, ',
+      'ist er wie alte Mineralwolle im Sinne der TRGS 521 zu behandeln. Bei Ausbau, Demontage und Instandhaltung sind die Schutzmaßnahmen der TRGS 521 einzuhalten.'] });
+  }
+
+  /* Unterschriften und Anlagen */
+  const unterschriften = [];
+  if (sv) unterschriften.push({ kuerzel: sv.kuerzel, rolle: rollentext(sv), name: sv.name });
+  else unterschriften.push({ kuerzel: '', rolle: 'Sachverständige(r)', name: { gap: '[Sachverständige(r)]' } });
+  if (mt && (!sv || mt.kuerzel !== sv.kuerzel)) unterschriften.push({ kuerzel: mt.kuerzel, rolle: rollentext(mt), name: mt.name });
+  if (sv && sv.rolle === 'mt') hinweise.push(`${sv.name} ist in den Einstellungen als Messtechniker eingetragen, unterschreibt hier aber als Sachverständige(r).`);
+  [sv, pn, mt].filter(Boolean).forEach(p => { if (!p.geschlecht) hinweise.push(`${p.name}: in den Einstellungen fehlt Frau/Herr.`); });
+  const anlagen = (berichtNr.length ? berichtNr : ['']).map((nr, i) =>
+    [`Anlage ${i + 1}: Prüfbericht Nr. `, L(nr, 'Prüfbericht-Nr.'), ' (', L(labor, 'Labor'), ')']);
+
+  const abschnitte = [
+    { titel: '1. Veranlassung', inhalt: v },
+    { titel: '2. Probenahme und Untersuchung', inhalt: pr },
+    { titel: '3. Befund', inhalt: bf },
+    { titel: '4. Schlussfolgerungen', inhalt: sf },
+  ];
+  const modell = {
+    dateiname: `${+f.mitteilung || 1}._Mitteilung_${P.nr || 'Projekt'}.docx`,
+    deckblatt: { titel: `Untersuchungsbericht vom ${datum}`, mitteilung, projektnummer: P.nr, betreff: betreffRuns, felder },
+    kopf, abschnitte, ortDatum: `Würselen, ${datum}`, unterschriften, anlagen, proben, hinweise,
+  };
+  modell.luecken = luecken(modell);
+  return modell;
+}
+/** Alle offenen Lücken im Modell (für die Hinweisliste) */
+function luecken(m) {
+  const out = new Set();
+  const lauf = x => { if (!x) return; if (Array.isArray(x)) x.forEach(lauf); else if (typeof x === 'object') { if (x.gap) out.add(x.gap); else Object.values(x).forEach(lauf); } };
+  lauf([m.deckblatt, m.kopf, m.abschnitte, m.unterschriften, m.anlagen]);
+  return [...out];
+}
+/** Runs → reiner Text (Lücken in eckigen Klammern) */
+const text = runs => (Array.isArray(runs) ? runs : [runs]).map(r => (r && typeof r === 'object' ? r.gap : String(r == null ? '' : r))).join('');
+
+const API = { VERSION: 1, bericht, asbestBefund, kmfWerte, person, rollentext, namensteile, datumDE, zeilen, liste, zahlwort, probenSammeln, projektSicht, text };
+if (typeof module === 'object' && module.exports) module.exports = API;
+root.BerichtText = API;
+})(typeof globalThis !== 'undefined' ? globalThis : this);
