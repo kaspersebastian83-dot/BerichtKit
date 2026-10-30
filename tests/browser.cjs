@@ -98,6 +98,16 @@ const daten = {
     await page.waitForSelector('#vorschau figure img');
     // Labor fehlt noch → Lücke; Probenehmer ohne Frau/Herr → Hinweis
     assert.match(await page.textContent('#hinweise'), /Lücke im Bericht: \[Labor\]/);
+    // Versicherer nur angenommen (Auftraggeber): eine Meldung in den Hinweisen, am Feld nur „angenommen“; „✓ stimmt“ bestätigt
+    const hw = () => page.textContent('#hinweise');
+    assert.equal((await hw()).match(/Versicherer angenommen/g).length, 1, 'nicht doppelt');
+    assert.match(await hw(), /Versicherer angenommen: Auftraggeber „Beispiel Versicherung AG“ – bitte prüfen\./);
+    assert.equal(await page.textContent('#qVers'), 'angenommen – bitte prüfen'); assert.ok(await page.isVisible('#btnVersOk'));
+    await page.click('#hinweise [data-ok="versicherer"]');
+    assert.doesNotMatch(await hw(), /Versicherer angenommen/);
+    assert.equal(await page.textContent('#qVers'), 'Auftraggeber = Versicherer (bestätigt)'); assert.ok(await page.isHidden('#btnVersOk'));
+    // SV hat selbst Proben genommen, Rolle nicht festgelegt → Hinweis mit Knopf zu den Einstellungen
+    assert.match(await hw(), /Dr\. Tanja Test hat die Proben genommen und unterschreibt als Sachverständige\(r\) – die Rolle ist in den Einstellungen noch nicht festgelegt\./);
     // Anlagen: Prüfbericht 1, Bilddoku 2 (zwei Dateien = eine Anlage), Probenplan 3; Raumbuch angeboten, nicht angehakt
     const anl = () => page.textContent('#anlagenListe');
     assert.match(await anl(), /Anlage 1\s*Prüfbericht AR-999-2026-000001-01/);
@@ -125,6 +135,9 @@ const daten = {
     await page.waitForSelector('#anlagenListe li.z-veraltet');
     assert.ok(!(await page.isChecked('input[data-anl="bilddoku"]')));
     assert.match(await anl(), /veraltet[\s\S]*nach dem Erstellen in FotoKit geändert[\s\S]*in FotoKit öffnen/);
+    // … und nicht still: Hinweis „nicht im Bericht“ mit Sprung in FotoKit
+    assert.match(await hw(), /Bilddokumentation veraltet – nicht im Bericht\. In FotoKit neu erstellen oder trotzdem anhaken\.\s*in FotoKit öffnen ↗/);
+    assert.equal(await page.getAttribute('#hinweise a[target="bildumbenenner"]', 'href'), '../Bildumbenenner/#projekt=' + encodeURIComponent(PROJEKT));
     assert.match(await page.textContent('#vorschau'), /Anlage 2:\s*Probenplan/);
     // wieder aktuell (neu erstellt) → wieder angehakt
     await page.evaluate(async P => {
@@ -136,6 +149,7 @@ const daten = {
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await page.waitForFunction(() => !document.querySelector('#anlagenListe li.z-veraltet'));
     assert.ok(await page.isChecked('input[data-anl="bilddoku"]'), 'neue Fassung: wieder vorgehakt');
+    assert.doesNotMatch(await hw(), /Bilddokumentation veraltet/);
 
     // Zurück aus ResultKit („Übernehmen“ mit neuem Wert): Laborwerte beim Fokus neu gelesen, bleibender Hinweis
     assert.ok(await page.isHidden('#meldungen'));
@@ -156,9 +170,12 @@ const daten = {
     await page.click('#btnMeldungenWeg'); assert.ok(await page.isHidden('#meldungen'));
 
     // Einstellungen: Labor und Personen für das Büro speichern
-    await page.click('#btnEinstellungen');
+    await page.click('#hinweise [data-aktion="einstellungen"]');
+    await page.waitForFunction(() => document.getElementById('dlgEinstellungen').open);
+    assert.equal(await page.inputValue('tr[data-k="Tst"] select[data-f="rolle"]'), '', 'Rolle noch nicht festgelegt');
     await page.fill('#eLabor', 'Eurofins Beispiel-Labor GmbH');
     await page.selectOption('tr[data-k="Tst"] select[data-f="geschlecht"]', 'w');
+    await page.selectOption('tr[data-k="Tst"] select[data-f="rolle"]', 'sv');
     await page.selectOption('tr[data-k="Mes"] select[data-f="geschlecht"]', 'm');
     await page.selectOption('tr[data-k="Mes"] select[data-f="rolle"]', 'mt');
     await page.click('#eSpeichern');
@@ -166,6 +183,12 @@ const daten = {
     const cfg = await page.evaluate(async () => JSON.parse(await (await (await (await (await navigator.storage.getDirectory()).getDirectoryHandle('Archiv')).getFileHandle('_Spektron-BerichtKit.json')).getFile()).text()));
     assert.equal(cfg.format, 'spektron-berichtkit'); assert.equal(cfg.labor, 'Eurofins Beispiel-Labor GmbH');
     assert.deepEqual(cfg.personen.Mes, { geschlecht: 'm', rolle: 'mt' });
+    assert.deepEqual(cfg.personen.Tst, { geschlecht: 'w', rolle: 'sv' }, '„Sachverständige(r)“ wird ausdrücklich gespeichert');
+    assert.equal(cfg.personen.Vom, undefined, 'nichts eingetragen – kein Eintrag');
+    assert.doesNotMatch(await hw(), /hat die Proben genommen/, 'nach einmaligem Festlegen weg');
+    await page.click('#btnEinstellungen');   // bleibt beim erneuten Öffnen stehen
+    assert.equal(await page.inputValue('tr[data-k="Tst"] select[data-f="rolle"]'), 'sv');
+    await page.click('#eAbbrechen'); await page.waitForFunction(() => !document.getElementById('dlgEinstellungen').open);
 
     // Personen wählen: Probenahme durch Messtechniker → zweite Unterschrift automatisch
     await page.selectOption('#fPn', 'Mes');
@@ -248,7 +271,7 @@ const daten = {
       return JSON.parse(await (await (await d.getFileHandle('_BerichtKit.json')).getFile()).text());
     }, PROJEKT);
     assert.equal(zustand.format, 'spektron-bericht'); assert.equal(zustand.projekt, '99.9001'); assert.equal(zustand.nurEigene, true);
-    assert.equal(zustand.form.probenehmer, 'Mes'); assert.equal(zustand.form.einbau, 'vor1996'); assert.equal(zustand.form.mitteilung, 1);
+    assert.equal(zustand.form.probenehmer, 'Mes'); assert.equal(zustand.form.versOk, 'Beispiel Versicherung AG', 'Bestätigung gilt für alle'); assert.equal(zustand.form.einbau, 'vor1996'); assert.equal(zustand.form.mitteilung, 1);
     // nur selbst Geändertes: Datum, Variante, Labor (folgt den Einstellungen) und Auftragsdatum werden nicht eingefroren
     for (const k of ['datum', 'variante', 'labor', 'auftragsdatum', 'agSatz', 'kmf']) assert.ok(!(k in zustand.form), 'nicht in der Datei: ' + k);
     assert.equal(zustand.berichte[0].mitteilung, 1); assert.equal(zustand.berichte[0].datum, heuteISO);

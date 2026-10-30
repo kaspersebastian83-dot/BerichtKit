@@ -5,6 +5,8 @@ const D = require('./daten/beispiel.cjs');
 const alles = m => m.abschnitte.map(a => a.titel + '\n' + a.inhalt.map(x => x.t === 'p' ? T.text(x.runs) : x.t === 'fig' ? x.caption
   : x.caption + '\n' + x.zeilen.map(z => z.join(' | ')).join('\n')).join('\n')).join('\n');
 const form = (o = {}) => ({ datum: '2026-10-27', mitteilung: 1, variante: 'eigen', probenehmer: 'Mes', sv: 'Tst', mt: 'Mes', ...o });
+/** Annahmen außer dem Probenehmer (der ist in den Testdaten ohne Feldbogen immer angenommen) */
+const ids = m => m.annahmen.filter(a => a.id !== 'probenehmer').map(a => a.id), eine = m => m.annahmen.find(a => a.id !== 'probenehmer');
 let n = 0; const fall = (name, fn) => { fn(); n++; console.log('ok –', name); };
 
 fall('Probenahme durch uns, eine positive Probe, Versicherungsfall', () => {
@@ -143,9 +145,65 @@ fall('Versicherer: Projektzentrale vor Annahme aus dem Auftraggeber', () => {
   let m = T.bericht({ ...basis, pj: D.pj({ versicherer: 'Muster Assekuranz AG' }) });
   assert.deepEqual(m.deckblatt.felder[2], ['Versicherer:', ['Muster Assekuranz AG']]);
   assert.ok(!m.hinweise.some(h => /Versicherer angenommen/.test(h)));
+  assert.equal(m.versichererQuelle, null);
   m = T.bericht({ ...basis, pj: D.pj() });
   assert.deepEqual(m.deckblatt.felder[2], ['Versicherer:', ['Beispiel Versicherung AG']]);
-  assert.ok(m.hinweise.some(h => /Versicherer angenommen: Auftraggeber „Beispiel Versicherung AG“/.test(h)));
+  // eine Meldung (Annahme mit „✓ stimmt“), nicht zusätzlich in den Hinweisen
+  assert.ok(!m.hinweise.some(h => /Versicherer/.test(h)), 'nicht doppelt');
+  assert.deepEqual(ids(m), ['versicherer']);
+  assert.match(eine(m).text, /^Versicherer angenommen: Auftraggeber „Beispiel Versicherung AG“ – bitte prüfen\. Stimmt das nicht, trag den Versicherer/);
+  assert.equal(eine(m).wert, 'Beispiel Versicherung AG');
+});
+
+fall('Versicherer angenommen → „✓ stimmt“: bestätigt bleibt nur, solange es derselbe Auftraggeber ist', () => {
+  const basis = { lk: D.lk([[1, '2026-10-16', 'Keller', 'Putz', 'Sonstige']]), erg: D.erg([[1, 'kein']]), cfg: D.cfg, mitarbeiter: D.mitarbeiter };
+  let m = T.bericht({ ...basis, pj: D.pj(), form: form({ versOk: 'Beispiel Versicherung AG' }) });
+  assert.deepEqual(ids(m), []); assert.equal(m.versichererQuelle.angenommen, false);
+  assert.deepEqual(m.deckblatt.felder[2], ['Versicherer:', ['Beispiel Versicherung AG']], 'Deckblatt unverändert');
+  m = T.bericht({ ...basis, pj: D.pj({ auftraggeber: 'Andere Versicherung AG, Weg 1, 11111 Ort' }), form: form({ versOk: 'Beispiel Versicherung AG' }) });
+  assert.deepEqual(ids(m), ['versicherer'], 'anderer Auftraggeber → wieder gefragt');
+  // Auftraggeber = VN: keine Annahme, sondern Aufforderung zum Eintragen
+  m = T.bericht({ ...basis, pj: D.pj({ auftraggeber: 'Muster Hausverwaltung GmbH, Hauptstr. 5, 12345 Musterstadt' }), form: form({ deckblatt: 'versicherung' }) });
+  assert.deepEqual(ids(m), []); assert.ok(m.hinweise.includes('Auftraggeber und VN sind gleich – trag den Versicherer unter „Versicherer“ ein.'));
+});
+
+fall('Unterschrift: Zuständiger ist Messtechniker → erste(r) SV angenommen, mit „✓ stimmt“', () => {
+  const cfg = D.cfg, ma = D.mitarbeiter;
+  assert.deepEqual(T.svVorschlag(cfg, ma, 'Vom'), { kuerzel: 'Vom', angenommen: false, grund: '' }, 'Zuständiger ist SV');
+  assert.deepEqual(T.svVorschlag(cfg, ma, 'Mes'), { kuerzel: 'Tst', angenommen: true, grund: 'zuständig laut Ordner ist Max Messer, Messtechniker' });
+  assert.deepEqual(T.svVorschlag(cfg, ma, ''), { kuerzel: 'Tst', angenommen: true, grund: 'kein Zuständiger im Projekt' });
+  assert.equal(T.svVorschlag({ personen: { Tst: { rolle: 'mt' }, Mes: { rolle: 'mt' }, Vom: { rolle: 'mt' } } }, ma, 'Mes').kuerzel, '', 'niemand ist SV');
+  const basis = { pj: D.pj({ versicherer: 'Muster Assekuranz AG' }), lk: D.lk([[1, '2026-10-16', 'Keller', 'Putz', 'Sonstige']]), erg: D.erg([[1, 'kein']]), cfg, mitarbeiter: ma };
+  const vorschlag = T.svVorschlag(cfg, ma, 'Mes');
+  let m = T.bericht({ ...basis, form: form({ sv: 'Tst', svVorschlag: vorschlag }) });
+  assert.deepEqual(ids(m), ['sv']);
+  assert.equal(eine(m).text, 'Unterschrift: Dr. Tanja Test angenommen (zuständig laut Ordner ist Max Messer, Messtechniker) – bitte prüfen.');
+  assert.deepEqual(m.unterschriften[0].name, 'Dr. Tanja Test', 'Bericht unverändert');
+  m = T.bericht({ ...basis, form: form({ sv: 'Tst', svVorschlag: vorschlag, svOk: 'Tst' }) });
+  assert.deepEqual(ids(m), [], '✓ stimmt'); assert.equal(m.svQuelle.angenommen, false);
+  m = T.bericht({ ...basis, form: form({ sv: 'Vom', svVorschlag: vorschlag }) });
+  assert.equal(m.svQuelle, null, 'andere Person gewählt – keine Annahme');
+  m = T.bericht({ ...basis, form: form({ sv: 'Tst', svVorschlag: T.svVorschlag(cfg, ma, 'Tst') }) });
+  assert.equal(m.svQuelle, null, 'Zuständiger ist SV – keine Annahme');
+});
+
+fall('SV hat selbst Proben genommen: Hinweis hängt an der festgelegten Rolle, nicht am Eintrag', () => {
+  const basis = { pj: D.pj(), lk: D.lk([[1, '2026-10-16', 'Keller', 'Putz', 'Sonstige']]), erg: D.erg([[1, 'kein']]), mitarbeiter: D.mitarbeiter };
+  const f = form({ probenehmer: 'Tst', sv: 'Tst', mt: '', pnQuelle: 'hand' });
+  const rollenHinweis = m => m.hinweise.find(h => /hat die Proben genommen/.test(h));
+  // Eintrag ohne Rolle (nur Frau/Herr) – so speicherte BerichtKit bis 1.7.0 „Sachverständige(r)“: Hinweis bleibt
+  let m = T.bericht({ ...basis, cfg: { personen: { Tst: { geschlecht: 'w' } } }, form: f });
+  const h = rollenHinweis(m);
+  assert.equal(h, 'Dr. Tanja Test hat die Proben genommen und unterschreibt als Sachverständige(r) – die Rolle ist in den Einstellungen noch nicht festgelegt. Leg sie dort einmal fest (Sachverständige(r) oder Messtechniker(in)).');
+  assert.deepEqual(m.hinweisAktionen[h], { einstellungen: true });
+  assert.ok(rollenHinweis(T.bericht({ ...basis, cfg: { personen: {} }, form: f })), 'ganz ohne Eintrag');
+  // Rolle ausdrücklich festgelegt (auch „sv“) → weg
+  assert.equal(rollenHinweis(T.bericht({ ...basis, cfg: { personen: { Tst: { geschlecht: 'w', rolle: 'sv' } } }, form: f })), undefined);
+  assert.equal(rollenHinweis(T.bericht({ ...basis, cfg: { personen: { Tst: { rolle: 'sv' } } }, form: f })), undefined);
+  // für diesen Bericht „als Sachverständige(r)“ gewählt → weg
+  assert.equal(rollenHinweis(T.bericht({ ...basis, cfg: { personen: {} }, form: { ...f, rolle1: 'sv' } })), undefined);
+  assert.equal(T.rolleFestgelegt({ personen: { A: { rolle: 'mt' }, B: { name: 'x' } } }, 'A'), true);
+  assert.equal(T.rolleFestgelegt({ personen: { A: { rolle: 'mt' }, B: { name: 'x' } } }, 'B'), false);
 });
 
 fall('Probenehmer: genauer Feldbogen-Treffer, eigene Auswahl, sonst „angenommen“', () => {
@@ -158,6 +216,12 @@ fall('Probenehmer: genauer Feldbogen-Treffer, eigene Auswahl, sonst „angenomme
   assert.equal(q.angenommen, true, 'Auswahl weicht vom Feldbogen ab');
   q = T.bericht({ ...basis, form: form({ probenehmer: 'Tst', pnQuelle: 'hand' }) }).probenehmerQuelle;
   assert.deepEqual(q, { angenommen: false, text: 'eigene Auswahl' });
+  // angenommen: eine Meldung mit „✓ stimmt“ (annahmen), bestätigt (pnQuelle = 'hand') → weg
+  let m = T.bericht({ ...basis, feldbogen: { text: 'M. Messer', kuerzel: '' }, form: form({ probenehmer: 'Tst' }) });
+  const pnMeldung = m => m.annahmen.filter(a => a.id === 'probenehmer');
+  assert.equal(pnMeldung(m).length, 1); assert.match(pnMeldung(m)[0].text, /Dr\. Tanja Test angenommen/);
+  m = T.bericht({ ...basis, feldbogen: { text: 'M. Messer', kuerzel: '' }, form: form({ probenehmer: 'Tst', pnQuelle: 'hand' }) });
+  assert.deepEqual(pnMeldung(m), []);
   assert.equal(T.bericht({ ...basis, form: form({ variante: 'zugestellt' }) }).probenehmerQuelle, null);
 });
 

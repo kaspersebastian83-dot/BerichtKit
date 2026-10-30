@@ -9,13 +9,13 @@ Adresse: `https://kaspersebastian83-dot.github.io/berichtkit/` · aus der Projek
 
 | Im Bericht | Quelle | Datei |
 |---|---|---|
-| Deckblatt (VN/Auftraggeber, Risiko/Schadenort, Versicherer, Schaden-Nr.), Auftragsdatum | Projektzentrale | `_Projekt.json` – „mit Versicherung“, wenn `versicherer` eingetragen ist oder (bei eingetragenem VN) der Auftraggeber eine Versicherung ist, sonst „ohne“; im Bericht unter „Auftrag“ umstellbar. Versicherer: `versicherer`, sonst der Auftraggeber (als „angenommen“ angezeigt) |
+| Deckblatt (VN/Auftraggeber, Risiko/Schadenort, Versicherer, Schaden-Nr.), Auftragsdatum | Projektzentrale | `_Projekt.json` – „mit Versicherung“, wenn `versicherer` eingetragen ist oder (bei eingetragenem VN) der Auftraggeber eine Versicherung ist, sonst „ohne“; im Bericht unter „Auftrag“ umstellbar. Versicherer: `versicherer`, sonst der Auftraggeber (als „angenommen“ angezeigt, mit „✓ stimmt“ bestätigt – `versOk` gilt nur für diesen Auftraggeber) |
 | Proben: Entnahmestelle, Material (`z3`, leer → aus der Matrix), Probenahmedatum; Probenehmer (Feldbogen, nur genauer Name) | LabelKit (Asbest-Tabelle) | `*_Daten.json` – die Datei, die ResultKit übernommen hat (`auftrag.quelle`), sonst die neueste |
 | Ergebnis, Labor-Nr., Prüfbericht-Nr., KI-Wert (falls im XML) | ResultKit | `_Ergebnisse.json` |
 | Fotos zu den Proben (Probe-Nr. in FotoKit) | FotoKit | `_Bildumbenenner.json` + `Fotos/` |
 | Anlagen (Bilddokumentation, Probenplan, optional Ergebniskarte/Raumbuch/Wandansichten/Anlage Probenahme) | FotoKit, PlanKit | `Fotos/Bilddokumentation_*.pdf`, `Pläne/Probenplan *.pdf`, `Mitteilungen/*_Raumbuch_*.docx` … – siehe „Anlagen“ |
 | Namen | Projektzentrale | `<Archiv>/_Spektron-Mitarbeiter.json` |
-| Rollen, Frau/Herr (ohne Eintrag: Büro-Standard nach Nachname), Labor | BerichtKit „Einstellungen“ | `<Archiv>/_Spektron-BerichtKit.json` – die Rolle („als Sachverständige(r)“/„als Messtechniker(in)“) ist je Unterschrift vorgewählt und im Bericht änderbar |
+| Rollen, Frau/Herr (ohne Eintrag: Büro-Standard nach Nachname), Labor | BerichtKit „Einstellungen“ | `<Archiv>/_Spektron-BerichtKit.json` – die Rolle („als Sachverständige(r)“/„als Messtechniker(in)“) ist je Unterschrift vorgewählt und im Bericht änderbar. Ab 1.8.0 wird auch `rolle: 'sv'` gespeichert; ohne `rolle` gilt die Person als SV, die Rolle aber als „nicht festgelegt“ (Hinweis, wenn sie selbst Proben genommen hat) |
 | Unterschriften | von Hand abgelegt | `<Archiv>/_Spektron-Unterschriften/<Kürzel>.png` |
 | Angaben zum Bericht (Variante, Daten, Personen, Auswahl der Proben und Fotos) | BerichtKit, gemeinsam für alle | `_Spektron/BerichtKit/_BerichtKit.json` (Vor Spektron: `Mitteilungen/`) |
 
@@ -57,7 +57,8 @@ Die Ablageorte im Projekt bestimmt das gemeinsame Modul `spektron-ordner.js` (Be
   LabelKit-Datei eines anderen Projekts; LabelKit-Asbestprobe ohne Ergebnis in ResultKit (unter „Proben“ abwählbar).
 - **Hinweis:** Entnahmestelle LabelKit ↔ Prüfbericht weicht ab (Vergleich wie ResultKit `beschreibungWeichtAb`; wird nach dem
   Gegentest mit echten Projekten zur Sperre, Schalter `ABGLEICH_SPERRT` in `bericht-text.js`); vorläufiger Prüfbericht (dazu Kopfzeile
-  „Vorläufig“); Versicherer oder Probenehmer nur angenommen.
+  „Vorläufig“); Versicherer, Probenehmer oder Unterschrift nur angenommen – je eine Meldung mit „✓ stimmt“ (`pnQuelle`, `versOk`, `svOk`).
+  Unterschrift angenommen heißt: Der Zuständige ist Messtechniker(in) oder fehlt, vorgeschlagen ist die erste Sachverständige der Liste (`svVorschlag`).
 - **Lücken** sperren nicht – Rückfrage vor dem Speichern; die Übergabe ans Büro prüft, ob noch welche in der Word-Datei stehen.
 - Nach dem Speichern: `_BerichtKit.json` → `berichte[]` mit `anlagen` (alle Anlage-Dateien, z. B. `Laborergebnisse/<Prüfbericht>.pdf`, `Fotos/Bilddokumentation_….pdf`), `anlagenListe` und `luecken`; Knopf
   „Ans Büro übergeben →“ öffnet `../Projektzentrale/#projekt=<Ordner>&uebergabe=Mitteilungen/<Datei>`.
@@ -76,7 +77,8 @@ nur Arten von Anlagen; welche ein Bericht erwartet, sagt das Profil (`PROFILE.as
 | Raumbuch, Wandansichten, Anlage Probenahme | `Mitteilungen/` | PlanKit-Namen `<Nr>_Raumbuch_<Datum>.docx` usw. | Prüfsumme der `.probenplan` laut `_Anlagen-Protokoll.txt` ≠ jetzt; sonst Dateizeit |
 
 - Gefunden und aktuell → angehakt. **Veraltet oder unvollständig → Hinweis und nicht angehakt** (selbst anhaken geht, mit Hinweis).
-  Feste Anlagen, die fehlen, stehen grau da mit Link in die App. Ergebniskarte, Raumbuch, Wandansichten und Anlage Probenahme
+  Feste Anlagen, die fehlen, stehen grau da mit Link in die App. Jede feste Anlage, die nicht oder mit Mangel im Bericht ist (fehlt,
+  veraltet, unvollständig), bekommt zusätzlich einen Hinweis mit Sprung in die App – nichts fällt still heraus. Ergebniskarte, Raumbuch, Wandansichten und Anlage Probenahme
   sind optional: angeboten, nie vorgehakt, angehakt hinter dem Probenplan. „+ Weitere Datei …“ für eigene Anlagen aus dem Projektordner.
 - Die eigene Wahl gilt nur für denselben Stand (`form.anlagen[art].key`): eine neu erstellte oder inzwischen veraltete Anlage wird wieder nach der Regel vorgehakt.
 - Text: In „2. Probenahme und Untersuchung“ ein Satz „Die Entnahmestellen sind zusätzlich in der Bilddokumentation (Anlage 2) und im Probenplan (Anlage 3) dargestellt.“ – je nach Auswahl gekürzt.

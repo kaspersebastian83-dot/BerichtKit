@@ -146,10 +146,14 @@ function erkennen(e) {
    pruefberichte: [{ nr, pdf }] (pdf: Pfad oder ''), labor, gefunden: erkennen(), wahl: form.anlagen { <art>: { an, key } }
    (eigene Wahl gilt nur, solange dieselben Dateien im selben Stand gefunden werden), extra: form.anlagenExtra [{ pfad, bezeichnung, fehlt }],
    ohneEigeneProbenahme: zugestellte Probe – fehlende feste Anlagen nicht als „nicht gefunden“ anzeigen.
-   Ergebnis: { liste:[{ nr, art, titel, zeilen, dateien }], zeilen:[für die Oberfläche], nr:{ <art>: n }, hinweise:[] } */
+   Ergebnis: { liste:[{ nr, art, titel, zeilen, dateien }], zeilen:[für die Oberfläche], nr:{ <art>: n }, hinweise:[],
+               aktionen:{ <Hinweistext>: { art, was:'erstellen'|'öffnen' } } (Sprung in die App, die die Anlage erzeugt) }
+   Feste Anlagen bekommen immer einen Hinweis, wenn sie nicht (oder nicht so) im Bericht sind: fehlt, veraltet, unvollständig –
+   ob nach der Regel abgewählt oder angehakt trotz Mangel. Nichts fällt still aus dem Bericht. */
 function zusammenstellen(o) {
   o = o || {};
-  const profil = PROFILE[o.profil || 'asbest'], gefunden = o.gefunden || {}, wahl = o.wahl || {}, hinweise = [];
+  const profil = PROFILE[o.profil || 'asbest'], gefunden = o.gefunden || {}, wahl = o.wahl || {}, hinweise = [], aktionen = {};
+  const hinweis = (text, art, was) => { hinweise.push(text); if (art && ARTEN[art] && ARTEN[art].link) aktionen[text] = { art, was }; };
   const liste = [], zeilen = [], nr = {};
   const prb = (o.pruefberichte && o.pruefberichte.length ? o.pruefberichte : [{ nr: '', pdf: '' }]);
   prb.forEach(p => {
@@ -169,7 +173,13 @@ function zusammenstellen(o) {
   };
   const zeile = (art, fest) => {
     const k = gefunden[art], A = ARTEN[art];
-    if (!k) { if (fest && !o.ohneEigeneProbenahme) zeilen.push({ art, titel: A.titel, nr: null, an: false, fest, dateien: [], zustand: 'fehlt', grund: `nicht gefunden – in ${A.app} erstellen`, app: A }); return; }
+    if (!k) {
+      if (fest && !o.ohneEigeneProbenahme) {
+        zeilen.push({ art, titel: A.titel, nr: null, an: false, fest, dateien: [], zustand: 'fehlt', grund: `nicht gefunden – in ${A.app} erstellen`, app: A });
+        hinweis(`${A.titel} nicht gefunden – nicht im Bericht. In ${A.app} erstellen.`, art, 'erstellen');
+      }
+      return;
+    }
     const an = anHaken(art, k, fest), n = an ? liste.length + 1 : null;
     const titel = A.titel + (art === 'probenplan' || art === 'ergebniskarte' ? (k.details ? ` (${k.details})` : '') : '');
     if (an) { liste.push({ nr: n, art, titel, dateien: k.dateien, zeilen: [[titel]] }); nr[art] = n; }
@@ -179,7 +189,9 @@ function zusammenstellen(o) {
       if (k.nrImDokument == null) hinweise.push(`Bilddokumentation: keine Anlagen-Nr. in FotoKit eingetragen – im Bericht ist sie Anlage ${n}.`);
       else if (k.nrImDokument !== n) hinweise.push(`Bilddokumentation trägt „${k.nrQuelle}“, im Bericht ist sie Anlage ${n} – in FotoKit die Anlagen-Nr. ändern und die PDF neu erstellen.`);
     }
-    if (an && k.veraltet) hinweise.push(`${A.titel} ist angehakt, aber ${k.grund} – in ${A.app} neu erstellen.`);
+    const mangel = k.unvollstaendig ? 'unvollständig' : k.veraltet ? 'veraltet' : '';
+    if (mangel && an) hinweis(`${A.titel} ist angehakt, aber ${k.unvollstaendig ? `unvollständig (${k.grund})` : k.grund} – in ${A.app} neu erstellen.`, art, 'öffnen');
+    else if (mangel && fest) hinweis(`${A.titel} ${mangel}${k.unvollstaendig ? ` (${k.grund})` : ''} – nicht im Bericht. In ${A.app} neu erstellen oder trotzdem anhaken.`, art, 'öffnen');
   };
   profil.fest.forEach(a => zeile(a, true));
   profil.optional.forEach(a => zeile(a, false));
@@ -190,7 +202,7 @@ function zusammenstellen(o) {
     zeilen.push({ art: 'sonstiges', index: i, titel, bezeichnung: s(x.bezeichnung), nr: n, an, fest: false, dateien: [s(x.pfad)], zustand: x.fehlt ? 'fehlt' : 'ok', grund: x.fehlt ? 'Datei nicht mehr im Projektordner' : '' });
     if (x.fehlt) hinweise.push(`Weitere Anlage „${s(x.pfad)}“ liegt nicht mehr im Projektordner – nicht im Bericht.`);
   });
-  return { liste, zeilen, nr, hinweise };
+  return { liste, zeilen, nr, hinweise, aktionen };
 }
 
 /** Satz für „Probenahme und Untersuchung“: verweist auf Bilddokumentation und Probenplan, soweit angehakt. */

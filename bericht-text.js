@@ -124,6 +124,23 @@ function person(cfg, mitarbeiter, kuerzel) {
   const satz = s(c.satz) || (g ? `${g === 'w' ? 'Frau' : 'Herrn'} ${t.titel ? t.titel + ' ' : ''}${t.nachname}` : name);
   return { kuerzel: k, name, rolle: c.rolle === 'mt' ? 'mt' : 'sv', geschlecht: g, satz };
 }
+/** Rolle in den Einstellungen ausdrücklich festgelegt? (bis 1.7.0 wurde „Sachverständige(r)“ nie gespeichert – gilt als nicht festgelegt) */
+function rolleFestgelegt(cfg, kuerzel) {
+  const r = ((((cfg && cfg.personen) || {})[s(kuerzel)]) || {}).rolle;
+  return r === 'sv' || r === 'mt';
+}
+/** Vorschlag für die erste Unterschrift: der Zuständige laut Ordner, wenn er Sachverständige(r) ist. Sonst (Zuständiger ist
+    Messtechniker(in) oder fehlt) die erste Sachverständige der Mitarbeiterliste – das ist eine Annahme und wird angezeigt.
+    → { kuerzel, angenommen, grund } */
+function svVorschlag(cfg, mitarbeiter, zustaendig) {
+  const rolle = k => ((((cfg && cfg.personen) || {})[k]) || {}).rolle === 'mt' ? 'mt' : 'sv', z = s(zustaendig);
+  if (z && rolle(z) === 'sv') return { kuerzel: z, angenommen: false, grund: '' };
+  const erste = (mitarbeiter || []).find(p => s(p.ordnerKuerzel) && rolle(s(p.ordnerKuerzel)) === 'sv');
+  if (!erste) return { kuerzel: '', angenommen: false, grund: '' };
+  const zp = z ? person(cfg, mitarbeiter, z) : null;
+  return { kuerzel: s(erste.ordnerKuerzel), angenommen: true,
+    grund: zp ? `zuständig laut Ordner ist ${zp.name}, ${zp.geschlecht === 'w' ? 'Messtechnikerin' : 'Messtechniker'}` : 'kein Zuständiger im Projekt' };
+}
 function rollentext(p) {
   if (p.rolle === 'mt') return p.geschlecht === 'w' ? 'Die Messtechnikerin' : 'Der Messtechniker';
   return p.geschlecht === 'w' ? 'Die Sachverständige' : p.geschlecht === 'm' ? 'Der Sachverständige' : 'Sachverständige(r)';
@@ -225,17 +242,17 @@ function projektSicht(pj, ordner) {
    eingabe = { pj, ordner:{name,nr,kuerzel}, lk, erg, cfg, mitarbeiter, fotos:{label:[{datei,...}]}, anlagen: BerichtAnlagen.erkennen(…),
                feldbogen:{ text, kuerzel } (Probenehmer laut LabelKit-Feldbogen, kuerzel nur bei genauem Treffer),
                form:{ datum, mitteilung, variante:'eigen'|'zugestellt', eingangsdatum, auftragsdatum, agSatz, versicherer,
-                      deckblatt:'versicherung'|'direkt'|'' (leer = automatisch), probenahmedatum, probenehmer, pnQuelle:'hand'|undefined,
-                      sv (1. Unterschrift), mt (2. Unterschrift), rolle1, rolle2:'sv'|'mt'|'' (leer = laut Einstellungen), labor, aus:{label:false}, kmf:{label:true},
+                      deckblatt:'versicherung'|'direkt'|'' (leer = automatisch), versOk (bestätigter Versicherer), probenahmedatum, probenehmer, pnQuelle:'hand'|undefined,
+                      sv (1. Unterschrift), svVorschlag (Vorgabe: svVorschlag()), svOk (bestätigtes Kürzel), mt (2. Unterschrift), rolle1, rolle2:'sv'|'mt'|'' (leer = laut Einstellungen), labor, aus:{label:false}, kmf:{label:true},
                       who:{label:true}, ki:{label:'25'}, foto:{label:'datei'|''}, einbau:'vor1996'|'unbekannt',
                       anlagen:{art:{an,key}}, anlagenExtra:[{pfad,bezeichnung,fehlt}] } }
    Ergebnis: { dateiname, deckblatt, kopf, kennzeilen[], abschnitte, unterschriften, anlagen, anlagenTeile, anlagenDateien[], anlagenListe[], anlagenZeilen[], luecken[], hinweise[],
-               sperren[], probenehmerQuelle, offen[] }
+               sperren[], probenehmerQuelle, versichererQuelle, svQuelle, annahmen[{id,text,wert}], hinweisAktionen, offen[] }
    sperren: Die Daten passen nicht zusammen – dann nicht in „Mitteilungen“ speichern, nur als Entwurf herunterladen (alsEntwurf).
    Lücken sperren nicht: Die füllt der SV in Word aus; ob welche übrig sind, prüft die Übergabe ans Büro. */
 function bericht(eingabe) {
   const e = eingabe || {}, f = e.form || {}, P = projektSicht(e.pj, e.ordner);
-  const hinweise = [], sperren = [];
+  const hinweise = [], sperren = [], hinweisAktionen = {};   // hinweisAktionen: { <Hinweistext>: { app, link, ziel, was } | { einstellungen: true } }
   const { proben: alle, offen: offenAlle } = probenSammeln(e.erg, e.lk);
   const proben = alle.filter(p => !(f.aus && f.aus[p.label] === false));
   const offen = offenAlle.map(o => ({ ...o, aus: !!(f.aus && f.aus[o.label] === false) }));
@@ -295,9 +312,14 @@ function bericht(eingabe) {
   if (!f.deckblatt && !vfall && P.vn) hinweise.push(`Deckblatt ohne Versicherung (${P.versicherungsfallGrund}) – ist doch eine Versicherung beteiligt, unter „Auftrag“ umstellen.`);
   const agIstVn = vfall && gleicherName(nameVon(P.ag), nameVon(P.vn));
   const versicherer = s(f.versicherer) || nameVon(P.versicherer) || (agIstVn ? '' : nameVon(P.ag));
+  // Annahme „Auftraggeber = Versicherer“: eine Meldung (versichererQuelle), mit „✓ stimmt“ bestätigt (versOk = bestätigter Name –
+  // ändert sich der Auftraggeber, gilt die Bestätigung nicht mehr)
+  let versichererQuelle = null;
   if (vfall && !s(f.versicherer) && !P.versicherer) {
-    if (agIstVn) hinweise.push('Auftraggeber und VN sind gleich – Versicherer bitte unter „Versicherer“ eintragen.');
-    else if (versicherer) hinweise.push(`Versicherer angenommen: Auftraggeber „${versicherer}“ – bitte prüfen (in der Projektzentrale „Versicherer“ eintragen).`);
+    if (agIstVn) hinweise.push('Auftraggeber und VN sind gleich – trag den Versicherer unter „Versicherer“ ein.');
+    else if (versicherer) versichererQuelle = gleicherName(s(f.versOk), versicherer)
+      ? { angenommen: false, wert: versicherer, text: 'Auftraggeber = Versicherer (bestätigt)' }
+      : { angenommen: true, wert: versicherer, text: `Versicherer angenommen: Auftraggeber „${versicherer}“ – bitte prüfen. Stimmt das nicht, trag den Versicherer unter „Versicherer“ ein (oder in der Projektzentrale).` };
   }
   if (vfall) {
     felder.push(['VN:', zeilen(P.vn)], ['Risiko:', zeilen(P.objekt)], ['Versicherer:', [versicherer].filter(Boolean)]);
@@ -352,6 +374,7 @@ function bericht(eingabe) {
   const A = ANL.zusammenstellen({ profil: 'asbest', pruefberichte: berichtNr.map(nr => ({ nr, pdf: pdfVon(nr) })), labor, gefunden: e.anlagen || {},
     wahl: f.anlagen, extra: f.anlagenExtra, ohneEigeneProbenahme: zugestellt });
   hinweise.push(...A.hinweise);
+  for (const [h, a] of Object.entries(A.aktionen || {})) { const art = ANL.ARTEN[a.art]; hinweisAktionen[h] = { app: art.app, link: art.link, ziel: art.ziel, was: a.was }; }
   const verweis = ANL.verweisSatz(A.nr, eine);
   if (verweis) pr.push({ t: 'p', runs: [verweis] });
   const nrText = berichtNr.length ? liste(berichtNr.map(x => 'Nr. ' + x)) : { gap: '[Prüfbericht-Nr.]' };
@@ -416,8 +439,17 @@ function bericht(eingabe) {
   if (u1) unterschriften.push({ kuerzel: u1.kuerzel, rolle: rollentext(u1), name: u1.name });
   else unterschriften.push({ kuerzel: '', rolle: 'Sachverständige(r)', name: { gap: '[Sachverständige(r)]' } });
   if (u2 && (!u1 || u2.kuerzel !== u1.kuerzel)) unterschriften.push({ kuerzel: u2.kuerzel, rolle: rollentext(u2), name: u2.name });
-  if (sv && pn && sv.kuerzel === pn.kuerzel && !f.rolle1 && !((e.cfg && e.cfg.personen) || {})[sv.kuerzel] && !zugestellt)
-    hinweise.push(`${sv.name} hat die Proben genommen und unterschreibt als Sachverständige(r) – Rolle in den Einstellungen noch nicht festgelegt (Messtechniker?).`);
+  // Hängt an der Rolle, nicht am Eintrag: Ein Eintrag nur mit Frau/Herr oder Namen legt die Rolle nicht fest
+  if (sv && pn && sv.kuerzel === pn.kuerzel && !f.rolle1 && !rolleFestgelegt(e.cfg, sv.kuerzel) && !zugestellt) {
+    const h = `${sv.name} hat die Proben genommen und unterschreibt als Sachverständige(r) – die Rolle ist in den Einstellungen noch nicht festgelegt. Leg sie dort einmal fest (Sachverständige(r) oder Messtechniker(in)).`;
+    hinweise.push(h); hinweisAktionen[h] = { einstellungen: true };
+  }
+  // Unterschrift nur vorgeschlagen (Zuständiger ist Messtechniker(in) oder fehlt): Annahme mit „✓ stimmt“ (svOk = bestätigtes Kürzel)
+  const svV = f.svVorschlag;
+  const svQuelle = sv && svV && svV.angenommen && s(svV.kuerzel) === sv.kuerzel
+    ? (s(f.svOk) === sv.kuerzel ? { angenommen: false, text: 'bestätigt' }
+      : { angenommen: true, text: `Unterschrift: ${sv.name} angenommen (${svV.grund}) – bitte prüfen.` })
+    : null;
   [sv, pn, mt].filter((p, i, xs) => p && xs.findIndex(q => q && q.kuerzel === p.kuerzel) === i).forEach(p => { if (!p.geschlecht) hinweise.push(`${p.name}: in den Einstellungen fehlt Frau/Herr.`); });
   // Anlagen: „Anlage n:“ | Prüfbericht Nr. … / (Labor) – zweizeilig mit hängendem Einzug, die übrigen einzeilig; anlagen = als Fließtext
   const anlagenTeile = A.liste.map(a => ({ label: `Anlage ${a.nr}:`, zeilen: a.zeilen }));
@@ -438,7 +470,10 @@ function bericht(eingabe) {
     dateiname: `${+f.mitteilung || 1}._Mitteilung_${P.nr || 'Projekt'}.docx`,
     deckblatt: { titel: `Untersuchungsbericht vom ${datum}`, mitteilung, projektnummer: P.nr, betreff: betreffRuns, felder },
     kopf, kennzeilen, abschnitte, ortDatum: `Würselen, ${datum}`, unterschriften, versicherungsfall: vfall, anlagen, anlagenTeile, anlagenDateien, anlagenListe, anlagenZeilen: A.zeilen, proben, offen,
-    hinweise: [...new Set(hinweise)], sperren, probenehmerQuelle,
+    hinweise: [...new Set(hinweise)], hinweisAktionen, sperren, probenehmerQuelle, versichererQuelle, svQuelle,
+    // Annahmen, die mit „✓ stimmt“ bestätigt werden: je eine Meldung (Hinweisliste, am Feld nur „angenommen – bitte prüfen“)
+    annahmen: [['probenehmer', probenehmerQuelle], ['versicherer', versichererQuelle], ['sv', svQuelle]]
+      .filter(([, q]) => q && q.angenommen).map(([id, q]) => ({ id, text: q.text, wert: q.wert })),
   };
   modell.luecken = luecken(modell);
   return modell;
@@ -468,7 +503,7 @@ function luecken(m) {
 /** Runs → reiner Text (Lücken in eckigen Klammern) */
 const text = runs => (Array.isArray(runs) ? runs : [runs]).map(r => (r && typeof r === 'object' ? r.gap : String(r == null ? '' : r))).join('');
 
-const API = { VERSION: 1, bericht, istVersicherer, alsEntwurf, beschreibungKey, beschreibungWeichtAb, asbestBefund, kmfWerte, person, anredeStandard, rollentext, namensteile, matrixMaterial, raumAusschreiben, datumDE, zeilen, liste, zahlwort, probenSammeln, projektSicht, projektNummer, gleichesProjekt, text, mitArtikel, objektImSatz };
+const API = { VERSION: 1, bericht, istVersicherer, svVorschlag, rolleFestgelegt, alsEntwurf, beschreibungKey, beschreibungWeichtAb, asbestBefund, kmfWerte, person, anredeStandard, rollentext, namensteile, matrixMaterial, raumAusschreiben, datumDE, zeilen, liste, zahlwort, probenSammeln, projektSicht, projektNummer, gleichesProjekt, text, mitArtikel, objektImSatz };
 if (typeof module === 'object' && module.exports) module.exports = API;
 root.BerichtText = API;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
