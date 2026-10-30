@@ -35,6 +35,11 @@ fall('Bilddoku in Teilen = eine Anlage; fehlender Teil → unvollständig', () =
   assert.equal(k.dateien.length, 2); assert.equal(k.veraltet, null); assert.match(k.grund, /vor 1\.29/);
 });
 
+fall('Bilddoku über das KI-ZIP erstellt: „<Nr>_<Anlage>_Bilddokumentation.pdf“', () => {
+  const k = A.bilddokuFinden(fotos(['99.9001_Anlage 2_Bilddokumentation_Teil_1_von_2.pdf', t0], ['99.9001_Anlage 2_Bilddokumentation_Teil_2_von_2.pdf', t0], ['Bilddokumentationen-Notizen.txt', t0]), fk({ bilddoku: undefined }));
+  assert.equal(k.dateien.length, 2); assert.equal(k.unvollstaendig, false); assert.equal(k.veraltet, false);
+});
+
 fall('Bilddoku ohne Vermerk: neueste Gruppe, Stand über dokuGeaendert', () => {
   const liste = fotos(['Bilddokumentation_99.9001_Musterstadt_2026-10-20.pdf', t0 - 60 * min], ['Bilddokumentation_99.9001_Musterstadt_2026-10-30.pdf', t0]);
   const k = A.bilddokuFinden(liste, fk({ bilddoku: undefined, dokuGeaendert: iso(t0 + 10 * min) }));

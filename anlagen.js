@@ -37,11 +37,13 @@ const KOPIE = / \((\d+)\)(?=\.[a-z]+$)/i;
 const zeit = v => { const t = Date.parse(s(v)); return Number.isFinite(t) ? t : null; };
 const anlageNr = v => { const m = /(\d+)/.exec(s(v)); return m ? +m[1] : null; };
 
-/** Bilddokumentation aus FotoKit: Fotos/Bilddokumentation_<Nr>_<Ort>_<Datum>[ (k)][_Teil_i_von_n].pdf (ältere: „… - Teil 1 von 2.pdf“) */
+/** Bilddokumentation aus FotoKit: Fotos/Bilddokumentation_<Nr>_<Ort>_<Datum>[ (k)][_Teil_i_von_n].pdf (ältere: „… - Teil 1 von 2.pdf“);
+    über das ZIP für eine KI erstellt: <Projektnummer>_<Anlage>_Bilddokumentation[_Teil_i_von_n].pdf */
+const BILDDOKU = /^Bilddokumentation(?![a-zäöüß]).*\.pdf$|[_ ]Bilddokumentation(?:[_ -]+Teil[_ ]\d+[_ ]von[_ ]\d+)?\.pdf$/i;
 function bilddokuFinden(fotos, fk) {
   const gruppen = new Map();
   for (const f of fotos || []) {
-    const name = nfc(f.name); if (!/^Bilddokumentation(?![a-zäöüß]).*\.pdf$/i.test(name)) continue;
+    const name = nfc(f.name); if (!BILDDOKU.test(name)) continue;
     const m = TEIL.exec(name), key = name.replace(TEIL, '').toLowerCase();
     const g = gruppen.get(key) || { teile: new Map(), n: 0, t: 0 }; gruppen.set(key, g);
     const i = m ? +m[1] : 1, n = m ? +m[2] : 1;
