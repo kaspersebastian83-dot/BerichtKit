@@ -3,9 +3,10 @@
    Schreibt nur: die Word-Datei in „Mitteilungen“ und – über „Einstellungen“ – _Spektron-BerichtKit.json im Archivordner.
    Laborwerte und Probenbezeichnungen werden nie bearbeitet; fehlende Angaben erscheinen im Bericht gelb markiert. */
 'use strict';
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 const APP_DATE = '30.10.2026';
 const CHANGELOG = [
+  ['1.8.0', '30.10.2026', 'Anlagen fallen nicht mehr still aus dem Bericht: Fehlt die Bilddokumentation oder der Probenplan, ist eine davon veraltet oder unvollständig, steht immer ein Hinweis da („… veraltet – nicht im Bericht. In FotoKit neu erstellen oder trotzdem anhaken.“) – mit Sprung in FotoKit bzw. PlanKit. Annahmen bestätigen: „Versicherer angenommen“ steht nur noch einmal in den Hinweisen, mit „✓ stimmt“ wie beim Probenehmer; ändert sich der Auftraggeber, fragt BerichtKit wieder. Ist der Zuständige Messtechniker (oder fehlt), schlägt BerichtKit für die Unterschrift die erste Sachverständige der Liste vor – jetzt sichtbar als „angenommen – bitte prüfen“ mit „✓ stimmt“. Einstellungen: Die Rolle „Sachverständige(r)“ wird jetzt ausdrücklich gespeichert („nicht festgelegt“ ist eine eigene Wahl) – der Hinweis „… hat die Proben genommen … Rolle nicht festgelegt“ ist nach einmaligem Festlegen weg und hat einen Knopf „Einstellungen öffnen“.'],
   ['1.7.0', '30.10.2026', 'Berichtsdatum und Mitteilung-Nr. bleiben nicht mehr stehen: Vorgaben (heutiges Datum, nächste freie Mitteilung, Auftragsdatum, Auftraggeber, Probenehmer, Labor) werden bei jedem Öffnen neu berechnet; in „_BerichtKit.json“ stehen nur noch Felder, die jemand selbst geändert hat. Gibt es die gespeicherte Mitteilung schon, schlägt BerichtKit die nächste freie vor (außer jemand hat die Nummer bewusst zurückgestellt und noch nicht gespeichert); ein Datum, das zu einer schon gespeicherten Mitteilung gehört, weicht dem heutigen – beides mit Hinweis. Ältere Angaben (bis 1.6.1) werden beim Öffnen einmal bereinigt; was davon bleibt und von den Projektdaten abweicht, nennt ein Hinweis. „Datei gibt es schon“: eigener Dialog mit „Ersetzen“, „Daneben als (2) speichern“ und „Abbrechen“ (Standard, auch Esc) – ist die Mitteilung schon beim Büro, gibt es kein „Ersetzen“, sondern „Als nächste Mitteilung speichern“. Projektdaten, LabelKit und ResultKit werden beim Zurückkommen ins Fenster und vor dem Speichern/Herunterladen neu gelesen, wenn sie sich geändert haben – mit bleibendem Hinweis „Daten neu gelesen“; vor dem Speichern hält BerichtKit dann an, damit du die neue Vorschau erst ansehen kannst.'],
   ['1.6.1', '30.10.2026', 'Entnahmestelle: Raum-Kürzel aus LabelKit (SZ, WZ, KiZ, GZ, HWR, TRH; AZ nicht – im Asbestbericht steht AZ für Asbestzement) werden in Tabelle 1 und in den Bildunterschriften ausgeschrieben, z. B. „Bodenaufbau SZ“ → „Bodenaufbau Schlafzimmer“. Nur ganze Wörter in genau dieser Schreibweise; Geschosse (OG, EG …) bleiben. Ein Hinweis nennt jede Ersetzung. LabelKit, der Abgleich mit dem Prüfbericht und die Laborübergabe bleiben unverändert. Unterschriften: Die PNG in „_Spektron-Unterschriften“ wird jetzt auch gefunden, wenn das Kürzel anders geschrieben ist (Leerzeichen, Punkte, Groß/klein – „Dr. Ka.png“ passt zu „Dr.Ka“).'],
   ['1.6.0', '30.10.2026', 'Anlagen: BerichtKit sucht im Projektordner, was als Anlage beiliegt, und nummeriert in der festen Hausreihenfolge – Anlage 1 Prüfbericht(e), dann Bilddokumentation (FotoKit, „Fotos“), dann Probenplan (PlanKit, „Pläne“). Gefunden und aktuell = angehakt; veraltet (nach dem Erstellen in FotoKit/PlanKit geändert) = Hinweis und nicht angehakt; fehlt = graue Zeile mit Link in die App. Eine Anlage aus mehreren Dateien (Bilddoku in Teilen, Plan je Geschoss) ist eine Anlage. Ergebniskarte, Raumbuch, Wandansichten und die Word-Anlage „Probenahme“ aus PlanKit werden angeboten, aber nur angehakt mitgenommen. „+ Weitere Datei …“ für eigene Anlagen. In „2. Probenahme und Untersuchung“ ein Satz mit Verweis auf Bilddokumentation und Probenplan; Hinweis, wenn die Bilddoku eine andere Anlagen-Nr. trägt. Alle Anlagen-Dateien gehen in die Übergabe ans Büro.'],
@@ -360,10 +361,10 @@ async function naechsteMitteilung() {
 function vorgabenBerechnen() {
   const P = T.projektSicht(S.pj, S.ordner);
   const pn = (S.feldbogen && S.feldbogen.kuerzel) || P.zustaendig;
-  const svListe = S.mitarbeiter.filter(p => rolle(p.ordnerKuerzel) === 'sv');
-  const sv = P.zustaendig && rolle(P.zustaendig) === 'sv' ? P.zustaendig : (svListe[0] && svListe[0].ordnerKuerzel) || '';
+  // Unterschrift: Zuständiger, wenn Sachverständige(r) – sonst erste(r) SV der Liste, als Annahme sichtbar (bericht-text.js svVorschlag)
+  const svV = T.svVorschlag(S.cfg, S.mitarbeiter, P.zustaendig);
   return { datum: heute(), mitteilung: S.naechste, variante: 'eigen', eingangsdatum: '', auftragsdatum: P.auftragsdatum,
-    agSatz: T.mitArtikel(T.zeilen(P.ag)[0] || '').text, probenehmer: pn, sv, mt: pn && rolle(pn) === 'mt' ? pn : '', labor: S.cfg.labor || '', einbau: 'unbekannt',
+    agSatz: T.mitArtikel(T.zeilen(P.ag)[0] || '').text, probenehmer: pn, sv: svV.kuerzel, svVorschlag: svV, mt: pn && rolle(pn) === 'mt' ? pn : '', labor: S.cfg.labor || '', einbau: 'unbekannt',
     aus: {}, kmf: {}, who: {}, ki: {}, foto: {} };
 }
 const formNeu = () => { S.form = { ...S.vorgabe, ...S.eigen }; };
@@ -524,8 +525,10 @@ function render() {
     const pjVers = T.zeilen(P.versicherer)[0] || '';
     $('zeileVers').hidden = !m.versicherungsfall; $('fVers').value = f.versicherer || '';
     $('fVers').placeholder = pjVers || (agIstVn || !agName ? 'bitte eintragen' : agName);
+    const vq = m.versichererQuelle;   // Annahme „Auftraggeber = Versicherer“ – die Meldung selbst steht einmal in den Hinweisen
     $('qVers').textContent = f.versicherer ? 'eigene Angabe (Deckblatt)' : pjVers ? 'aus der Projektzentrale' : agIstVn ? 'Auftraggeber ist der VN selbst – Versicherer unbekannt'
-      : agName ? 'angenommen: Auftraggeber = Versicherer – bitte prüfen' : 'in der Projektzentrale nicht eingetragen'; }
+      : vq ? (vq.angenommen ? 'angenommen – bitte prüfen' : vq.text) : 'in der Projektzentrale nicht eingetragen';
+    $('qVers').classList.toggle('annahme', !!(vq && vq.angenommen)); $('btnVersOk').hidden = !(vq && vq.angenommen); }
   // Deckblatt mit/ohne Versicherung: ohne Wahl nach den Projektdaten (bericht-text.js versicherungsfallAuto), sonst die eigene Wahl
   document.querySelectorAll('input[name=deckblatt]').forEach(r => { r.checked = r.value === (m.versicherungsfall ? 'versicherung' : 'direkt'); });
   $('qDeckblatt').textContent = f.deckblatt ? 'selbst gewählt' : `automatisch: ${P.versicherungsfallGrund}`;
@@ -534,6 +537,8 @@ function render() {
   { const q = m.probenehmerQuelle; $('qPn').textContent = q ? (q.angenommen ? 'angenommen – bitte prüfen' : q.text) : '';
     $('qPn').classList.toggle('annahme', !!(q && q.angenommen)); $('btnPnOk').hidden = !(q && q.angenommen); }
   optionen($('fSv'), f.sv, '– bitte wählen –');
+  { const q = m.svQuelle; $('qSv').textContent = q && q.angenommen ? 'angenommen – bitte prüfen' : '';
+    $('qSv').classList.toggle('annahme', !!(q && q.angenommen)); $('btnSvOk').hidden = !(q && q.angenommen); }
   optionen($('fMt'), f.mt, 'keine'); $('zeileMt').hidden = zug;
   // „als …“: eigene Wahl für diesen Bericht, sonst die Rolle aus den Einstellungen
   $('fR1').value = f.rolle1 || rolle(f.sv); $('fR1').disabled = !f.sv;
@@ -570,9 +575,9 @@ function render() {
   // Hinweise
   $('hinweise').innerHTML = [
     ...m.sperren.map(x => `<li class="sperre">Gesperrt: ${esc(x)}</li>`),
-    ...(m.probenehmerQuelle && m.probenehmerQuelle.angenommen ? [`<li class="luecke">${esc(m.probenehmerQuelle.text)}</li>`] : []),
+    ...m.annahmen.map(a => `<li class="luecke">${esc(a.text)} <button type="button" class="klein-knopf" data-ok="${esc(a.id)}" title="Stimmt so – Hinweis ausblenden">✓ stimmt</button></li>`),
     ...m.luecken.map(l => `<li class="luecke">Lücke im Bericht: ${esc(l)}</li>`),
-    ...m.hinweise.map(h => `<li>${esc(h)}</li>`),
+    ...m.hinweise.map(h => `<li>${esc(h)}${aktionHtml(m.hinweisAktionen[h])}</li>`),
     ...[...S.quellenDaten, ...S.quellen].map(q => `<li class="${q.ok ? 'ok' : ''}">${q.ok ? '✓ ' : ''}${esc(q.text)}</li>`),
     ...(S.cfgOrt === 'lokal' ? ['<li>Archivordner nicht verbunden: Einstellungen gelten nur in diesem Browser.</li>'] : []),
   ].join('');
@@ -584,6 +589,19 @@ function render() {
   if (S.statusFest && Date.now() < S.statusFest.bis) $('status').innerHTML = S.statusFest.html;   // eben gemeldet – nicht gleich überschreiben
   else (S.statusFest = null, $('status')).textContent = gesperrt ? `Speichern gesperrt (${m.sperren.length}) – siehe Hinweise. „Entwurf herunterladen“ geht.`
     : `Speichert als Mitteilungen/${m.dateiname}` + (m.luecken.length ? ` · ${m.luecken.length} Lücke(n) gelb markiert` : '');
+}
+/** Sprung zu einem Hinweis: in die App, die die Anlage erzeugt, oder in die Einstellungen */
+function aktionHtml(a) {
+  if (!a) return '';
+  if (a.einstellungen) return ' <button type="button" class="klein-knopf" data-aktion="einstellungen">Einstellungen öffnen</button>';
+  return a.link && S.dir ? ` <a href="${esc(a.link)}#projekt=${encodeURIComponent(S.dir.name)}" target="${esc(a.ziel)}">in ${esc(a.app)} ${a.was === 'erstellen' ? 'erstellen' : 'öffnen'} ↗</a>` : '';
+}
+/** „✓ stimmt“ – Annahme bestätigen. Versicherer/Unterschrift: bestätigt ist der Wert, der jetzt angenommen ist (ändert er sich, wird wieder gefragt). */
+function bestaetigen(id) {
+  if (id === 'probenehmer') return setze('pnQuelle', 'hand');
+  const m = modell();
+  if (id === 'versicherer' && m.versichererQuelle) return setze('versOk', m.versichererQuelle.wert);
+  if (id === 'sv' && S.form.sv) return setze('svOk', S.form.sv);
 }
 const tagDE = t => { if (!t) return ''; const d = new Date(t); return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`; };
 const ZUSTAND = { veraltet: 'veraltet', unvollstaendig: 'unvollständig', unbekannt: 'Stand unbekannt', fehlt: 'fehlt' };
@@ -814,7 +832,7 @@ function einstellungenOeffnen() {
     return `<tr data-k="${esc(k)}"><td>${esc(k)}</td>
       <td><input type="text" data-f="name" value="${esc(p.name || '')}" placeholder="${esc(ma.name || '')}" title="Leer = Name aus der Projektzentrale; z. B. mit akademischem Grad"></td>
       <td><select data-f="geschlecht"><option value="">${({ w: 'Frau (Standard)', m: 'Herr (Standard)' })[T.anredeStandard(p.name || ma.name || '')] || '–'}</option><option value="w" ${p.geschlecht === 'w' ? 'selected' : ''}>Frau</option><option value="m" ${p.geschlecht === 'm' ? 'selected' : ''}>Herr</option></select></td>
-      <td><select data-f="rolle"><option value="sv">Sachverständige(r)</option><option value="mt" ${p.rolle === 'mt' ? 'selected' : ''}>Messtechniker(in)</option></select></td>
+      <td><select data-f="rolle"><option value="">nicht festgelegt (gilt als SV)</option><option value="sv" ${p.rolle === 'sv' ? 'selected' : ''}>Sachverständige(r)</option><option value="mt" ${p.rolle === 'mt' ? 'selected' : ''}>Messtechniker(in)</option></select></td>
       <td><input type="text" data-f="satz" value="${esc(p.satz || '')}" placeholder="${esc(vorschlag ? vorschlag.satz : '')}" title="„… wurde durch ___ entnommen“ – leer = Vorschlag"></td>
       <td>${S.sig[sigKey(k)] ? '<span class="ok">✓ vorhanden</span>' : `<span class="klein">fehlt (${esc(k)}.png)</span>`}</td></tr>`;
   }).join('') : '<tr><td colspan="6" class="klein">Keine Namensliste – in der Projektzentrale unter Mitarbeiter anlegen.</td></tr>';
@@ -825,7 +843,7 @@ async function einstellungenSpeichern() {
   const personen = {};
   for (const tr of $('ePersonen').querySelectorAll('tr[data-k]')) {
     const p = {}; for (const el of tr.querySelectorAll('[data-f]')) if (el.value.trim()) p[el.dataset.f] = el.value.trim();
-    if (p.rolle === 'sv') delete p.rolle; if (Object.keys(p).length) personen[tr.dataset.k] = p;
+    if (Object.keys(p).length) personen[tr.dataset.k] = p;   // Rolle wird auch als „sv“ gespeichert – sonst bliebe sie „nicht festgelegt“
   }
   const neu = { format: 'spektron-berichtkit', version: 1, hinweis: 'Einstellungen von BerichtKit (Spektron) – Namen, Rollen, Labor. Nicht von Hand bearbeiten.',
     labor: $('eLabor').value.trim(), personen, geaendert: new Date().toISOString(), geaendertMit: 'BerichtKit ' + APP_VERSION };
@@ -862,12 +880,20 @@ function verbinden() {
   $('fAg').onchange = () => render();
   $('fPn').onchange = e => { const k = e.target.value, mtAlt = S.form.mt; S.form.probenehmer = k; if (k && rolle(k) === 'mt') S.form.mt = k; else if (S.form.mt && S.form.mt !== k && rolle(S.form.mt) === 'mt') S.form.mt = '';
     S.form.pnQuelle = 'hand'; formMerken('probenehmer', 'pnQuelle', ...(S.form.mt !== mtAlt ? ['mt'] : [])); render(); };
-  $('btnPnOk').onclick = () => setze('pnQuelle', 'hand');
+  $('btnPnOk').onclick = () => bestaetigen('probenehmer');
+  $('btnVersOk').onclick = () => bestaetigen('versicherer');
+  $('btnSvOk').onclick = () => bestaetigen('sv');
+  $('hinweise').addEventListener('click', e => {
+    const ok = e.target.closest('[data-ok]'); if (ok) { bestaetigen(ok.dataset.ok); return; }
+    if (e.target.closest('[data-aktion="einstellungen"]')) einstellungenOeffnen();
+  });
   // Neue Person: „als …“ wieder nach den Einstellungen; gleiche Rolle wie in den Einstellungen = keine eigene Wahl
-  $('fSv').onchange = e => { S.form.sv = e.target.value; S.form.rolle1 = ''; formMerken('sv', 'rolle1'); render(); };
+  $('fSv').onchange = e => { S.form.sv = e.target.value; S.form.svOk = e.target.value; S.form.rolle1 = ''; formMerken('sv', 'svOk', 'rolle1'); render(); };   // selbst gewählt = bestätigt
   $('fMt').onchange = e => { S.form.mt = e.target.value; S.form.rolle2 = ''; formMerken('mt', 'rolle2'); render(); };
-  $('fR1').onchange = e => setze('rolle1', e.target.value === rolle(S.form.sv) ? '' : e.target.value);
-  $('fR2').onchange = e => setze('rolle2', e.target.value === rolle(S.form.mt) ? '' : e.target.value);
+  // Gleich wie in den Einstellungen = keine eigene Wahl – aber nur, wenn die Rolle dort festgelegt ist; sonst gilt die Wahl hier ausdrücklich
+  const rolleWahl = (k, v) => v === rolle(k) && T.rolleFestgelegt(S.cfg, k) ? '' : v;
+  $('fR1').onchange = e => setze('rolle1', rolleWahl(S.form.sv, e.target.value));
+  $('fR2').onchange = e => setze('rolle2', rolleWahl(S.form.mt, e.target.value));
   document.querySelectorAll('input[name=deckblatt]').forEach(r => { r.onchange = () => setze('deckblatt', r.value); });
   $('btnDeckblattAuto').onclick = () => setze('deckblatt', '');
   $('fLabor').onchange = e => setze('labor', e.target.value.trim());

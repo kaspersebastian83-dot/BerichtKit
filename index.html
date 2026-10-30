@@ -172,7 +172,7 @@ dialog .knoepfe{display:flex;justify-content:flex-end;gap:8px;padding:12px 22px;
         <label title="Auftraggeber · Schadenort · Schaden-Nr. – z. B. Hausverwaltung, Sanierer, Privatauftrag"><input type="radio" name="deckblatt" value="direkt"> ohne Versicherung</label></div>
         <span class="quelle"><span id="qDeckblatt"></span> <button type="button" class="klein-knopf" id="btnDeckblattAuto" hidden title="Wieder nach den Projektdaten entscheiden">automatisch</button></span></div>
       <div class="feld"><label for="fAg">Auftraggeber im Satz</label><input type="text" id="fAg" placeholder="z. B. die Firma … / den Bauverein …"><span class="quelle">„… wurde unser Büro durch <b>…</b> beauftragt“ – Artikel wird bei Firmen (GmbH, eG, AG …) ergänzt, sonst bitte selbst</span></div>
-      <div class="feld" id="zeileVers"><label for="fVers">Versicherer</label><input type="text" id="fVers"><span class="quelle" id="qVers"></span></div>
+      <div class="feld" id="zeileVers"><label for="fVers">Versicherer</label><input type="text" id="fVers"><span class="quelle"><span id="qVers"></span> <button type="button" class="klein-knopf" id="btnVersOk" hidden title="Auftraggeber ist der Versicherer – Hinweis ausblenden">✓ stimmt</button></span></div>
     </div>
     <div class="karte">
       <h2>Proben <span class="klein" style="text-transform:none" id="probenInfo"></span></h2>
@@ -190,7 +190,7 @@ dialog .knoepfe{display:flex;justify-content:flex-end;gap:8px;padding:12px 22px;
     <div class="karte">
       <h2>Personen</h2>
       <div class="feld" id="zeilePn"><label for="fPn">Probenahme durch</label><select id="fPn"></select><span class="quelle"><span id="qPn"></span> <button type="button" class="klein-knopf" id="btnPnOk" hidden title="Auswahl stimmt – Hinweis ausblenden">✓ stimmt</button></span></div>
-      <div class="feld"><label for="fSv">Unterschrift</label><div class="paar"><select id="fSv"></select><select id="fR1" aria-label="Unterschrift als"><option value="sv">als Sachverständige(r)</option><option value="mt">als Messtechniker(in)</option></select></div></div>
+      <div class="feld"><label for="fSv">Unterschrift</label><div class="paar"><select id="fSv"></select><select id="fR1" aria-label="Unterschrift als"><option value="sv">als Sachverständige(r)</option><option value="mt">als Messtechniker(in)</option></select></div><span class="quelle"><span id="qSv"></span> <button type="button" class="klein-knopf" id="btnSvOk" hidden title="Unterschrift stimmt – Hinweis ausblenden">✓ stimmt</button></span></div>
       <div class="feld" id="zeileMt"><label for="fMt">Zweite Unterschrift</label><div class="paar"><select id="fMt"></select><select id="fR2" aria-label="Zweite Unterschrift als"><option value="sv">als Sachverständige(r)</option><option value="mt">als Messtechniker(in)</option></select></div><span class="quelle">z. B. Messtechniker, der die Proben genommen hat – „als …“ folgt den Einstellungen, hier für diesen Bericht änderbar</span></div>
       <div class="feld"><label for="fLabor">Labor</label><input type="text" id="fLabor" list="laborListe"><datalist id="laborListe"><option value="Eurofins Boden und Grundwasser Südwest GmbH"><option value="Eurofins Umwelt West GmbH"></datalist></div>
     </div>

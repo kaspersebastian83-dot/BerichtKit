@@ -132,6 +132,47 @@ fall('Veraltet und unvollständig: nicht vorgehakt; angehakt mit Hinweis; fehlen
   assert.ok(!r.zeilen.some(x => x.zustand === 'fehlt' && x.art !== 'pruefbericht'), 'zugestellt: kein „nicht gefunden“');
 });
 
+fall('Feste Anlage nicht im Bericht: immer ein Hinweis mit Sprung in die App (veraltet, unvollständig, fehlt)', () => {
+  const pb = [{ nr: 'AR-1', pdf: '' }];
+  const bild = { art: 'bilddoku', dateien: ['Fotos/B.pdf'], key: 'b', veraltet: true, grund: 'nach dem Erstellen in FotoKit geändert', nrImDokument: 2, nrQuelle: 'Anlage 2' };
+  // veraltet, nach der Regel abgewählt; Probenplan fehlt
+  let r = A.zusammenstellen({ pruefberichte: pb, gefunden: { bilddoku: bild } });
+  const veraltet = 'Bilddokumentation veraltet – nicht im Bericht. In FotoKit neu erstellen oder trotzdem anhaken.';
+  const fehlt = 'Probenplan nicht gefunden – nicht im Bericht. In PlanKit erstellen.';
+  assert.ok(r.hinweise.includes(veraltet)); assert.ok(r.hinweise.includes(fehlt));
+  assert.deepEqual(r.aktionen[veraltet], { art: 'bilddoku', was: 'öffnen' });
+  assert.deepEqual(r.aktionen[fehlt], { art: 'probenplan', was: 'erstellen' });
+  // trotzdem angehakt → anderer Hinweis, kein „nicht im Bericht“
+  r = A.zusammenstellen({ pruefberichte: pb, gefunden: { bilddoku: bild }, wahl: { bilddoku: { an: true, key: 'b#veraltet' } } });
+  assert.ok(!r.hinweise.includes(veraltet)); assert.ok(r.hinweise.some(h => /^Bilddokumentation ist angehakt, aber nach dem Erstellen/.test(h)));
+  // selbst wieder abgewählt: bleibt veraltet und nicht im Bericht → Hinweis bleibt
+  r = A.zusammenstellen({ pruefberichte: pb, gefunden: { bilddoku: bild }, wahl: { bilddoku: { an: false, key: 'b#veraltet' } } });
+  assert.ok(r.hinweise.includes(veraltet));
+  // unvollständig (Teil fehlt) – abgewählt und angehakt
+  const teil = { ...bild, veraltet: false, unvollstaendig: true, grund: 'Teil fehlt – gefunden 1 von 2' };
+  r = A.zusammenstellen({ pruefberichte: pb, gefunden: { bilddoku: teil } });
+  assert.ok(r.hinweise.includes('Bilddokumentation unvollständig (Teil fehlt – gefunden 1 von 2) – nicht im Bericht. In FotoKit neu erstellen oder trotzdem anhaken.'));
+  r = A.zusammenstellen({ pruefberichte: pb, gefunden: { bilddoku: teil }, wahl: { bilddoku: { an: true, key: 'b' } } });
+  assert.ok(r.hinweise.includes('Bilddokumentation ist angehakt, aber unvollständig (Teil fehlt – gefunden 1 von 2) – in FotoKit neu erstellen.'));
+  // aktuell und selbst abgewählt: bewusst – kein Hinweis; zugestellt: fehlende feste Anlagen ohne Hinweis
+  r = A.zusammenstellen({ pruefberichte: pb, gefunden: { bilddoku: { ...bild, veraltet: false, grund: '' } }, wahl: { bilddoku: { an: false, key: 'b' } } });
+  assert.ok(!r.hinweise.some(h => /^Bilddokumentation/.test(h)));
+  r = A.zusammenstellen({ pruefberichte: pb, gefunden: {}, ohneEigeneProbenahme: true });
+  assert.deepEqual(r.hinweise, []);
+  // optionale Anlage veraltet und nicht angehakt: nur in der Liste, kein Hinweis
+  r = A.zusammenstellen({ pruefberichte: pb, gefunden: { raumbuch: { art: 'raumbuch', dateien: ['Mitteilungen/R.docx'], key: 'r', veraltet: true, grund: 'älter als der Plan in PlanKit' } } });
+  assert.ok(!r.hinweise.some(h => /Raumbuch/.test(h)));
+});
+
+fall('Im Bericht: Anlagen-Hinweis mit Sprung in die App (hinweisAktionen)', () => {
+  const m = T.bericht({ pj: D.pj(), lk: D.lk([[1, '2026-10-16', 'Keller', 'Putz', 'Sonstige']]), erg: D.erg([[1, 'kein']]), cfg: D.cfg, mitarbeiter: D.mitarbeiter,
+    form: { datum: '2026-10-27', mitteilung: 1, variante: 'eigen', probenehmer: 'Mes', sv: 'Tst', mt: 'Mes' } });
+  const h = 'Bilddokumentation nicht gefunden – nicht im Bericht. In FotoKit erstellen.';
+  assert.ok(m.hinweise.includes(h));
+  assert.deepEqual(m.hinweisAktionen[h], { app: 'FotoKit', link: '../Bildumbenenner/', ziel: 'bildumbenenner', was: 'erstellen' });
+  assert.ok(m.hinweise.includes('Probenplan nicht gefunden – nicht im Bericht. In PlanKit erstellen.'));
+});
+
 fall('Weitere Dateien: frei benannt, hinten angehängt; fehlende nicht im Bericht', () => {
   const r = A.zusammenstellen({ pruefberichte: [{ nr: 'AR-1', pdf: 'Laborergebnisse/AR-1.pdf' }], gefunden: {},
     extra: [{ pfad: 'Mitteilungen/Messprotokoll Raumluft.pdf', bezeichnung: 'Messprotokoll Raumluft' }, { pfad: 'Fotos/weg.pdf', fehlt: true }] });
