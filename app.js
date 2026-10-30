@@ -6,7 +6,7 @@
 const APP_VERSION = '1.7.0';
 const APP_DATE = '30.10.2026';
 const CHANGELOG = [
-  ['1.7.0', '30.10.2026', 'Berichtsdatum und Mitteilung-Nr. bleiben nicht mehr stehen: Vorgaben (heutiges Datum, nächste freie Mitteilung, Auftragsdatum, Auftraggeber, Probenehmer, Labor) werden bei jedem Öffnen neu berechnet; in „_BerichtKit.json“ stehen nur noch Felder, die jemand selbst geändert hat. Gibt es die gespeicherte Mitteilung schon, schlägt BerichtKit die nächste freie vor; ein Datum, das zu einer schon gespeicherten Mitteilung gehört, weicht dem heutigen – beides mit Hinweis. Ältere Angaben (bis 1.6.1) werden beim Öffnen einmal bereinigt. „Datei gibt es schon“: eigener Dialog mit „Ersetzen“, „Daneben als (2) speichern“ und „Abbrechen“ (Standard, auch Esc) – ist die Mitteilung schon beim Büro, gibt es kein „Ersetzen“, sondern „Als nächste Mitteilung speichern“. Projektdaten, LabelKit und ResultKit werden beim Zurückkommen ins Fenster und vor dem Speichern/Herunterladen neu gelesen, wenn sie sich geändert haben – mit bleibendem Hinweis „Daten neu gelesen“; vor dem Speichern hält BerichtKit dann an, damit du die neue Vorschau erst ansehen kannst.'],
+  ['1.7.0', '30.10.2026', 'Berichtsdatum und Mitteilung-Nr. bleiben nicht mehr stehen: Vorgaben (heutiges Datum, nächste freie Mitteilung, Auftragsdatum, Auftraggeber, Probenehmer, Labor) werden bei jedem Öffnen neu berechnet; in „_BerichtKit.json“ stehen nur noch Felder, die jemand selbst geändert hat. Gibt es die gespeicherte Mitteilung schon, schlägt BerichtKit die nächste freie vor (außer jemand hat die Nummer bewusst zurückgestellt und noch nicht gespeichert); ein Datum, das zu einer schon gespeicherten Mitteilung gehört, weicht dem heutigen – beides mit Hinweis. Ältere Angaben (bis 1.6.1) werden beim Öffnen einmal bereinigt; was davon bleibt und von den Projektdaten abweicht, nennt ein Hinweis. „Datei gibt es schon“: eigener Dialog mit „Ersetzen“, „Daneben als (2) speichern“ und „Abbrechen“ (Standard, auch Esc) – ist die Mitteilung schon beim Büro, gibt es kein „Ersetzen“, sondern „Als nächste Mitteilung speichern“. Projektdaten, LabelKit und ResultKit werden beim Zurückkommen ins Fenster und vor dem Speichern/Herunterladen neu gelesen, wenn sie sich geändert haben – mit bleibendem Hinweis „Daten neu gelesen“; vor dem Speichern hält BerichtKit dann an, damit du die neue Vorschau erst ansehen kannst.'],
   ['1.6.1', '30.10.2026', 'Entnahmestelle: Raum-Kürzel aus LabelKit (SZ, WZ, KiZ, GZ, HWR, TRH; AZ nicht – im Asbestbericht steht AZ für Asbestzement) werden in Tabelle 1 und in den Bildunterschriften ausgeschrieben, z. B. „Bodenaufbau SZ“ → „Bodenaufbau Schlafzimmer“. Nur ganze Wörter in genau dieser Schreibweise; Geschosse (OG, EG …) bleiben. Ein Hinweis nennt jede Ersetzung. LabelKit, der Abgleich mit dem Prüfbericht und die Laborübergabe bleiben unverändert. Unterschriften: Die PNG in „_Spektron-Unterschriften“ wird jetzt auch gefunden, wenn das Kürzel anders geschrieben ist (Leerzeichen, Punkte, Groß/klein – „Dr. Ka.png“ passt zu „Dr.Ka“).'],
   ['1.6.0', '30.10.2026', 'Anlagen: BerichtKit sucht im Projektordner, was als Anlage beiliegt, und nummeriert in der festen Hausreihenfolge – Anlage 1 Prüfbericht(e), dann Bilddokumentation (FotoKit, „Fotos“), dann Probenplan (PlanKit, „Pläne“). Gefunden und aktuell = angehakt; veraltet (nach dem Erstellen in FotoKit/PlanKit geändert) = Hinweis und nicht angehakt; fehlt = graue Zeile mit Link in die App. Eine Anlage aus mehreren Dateien (Bilddoku in Teilen, Plan je Geschoss) ist eine Anlage. Ergebniskarte, Raumbuch, Wandansichten und die Word-Anlage „Probenahme“ aus PlanKit werden angeboten, aber nur angehakt mitgenommen. „+ Weitere Datei …“ für eigene Anlagen. In „2. Probenahme und Untersuchung“ ein Satz mit Verweis auf Bilddokumentation und Probenplan; Hinweis, wenn die Bilddoku eine andere Anlagen-Nr. trägt. Alle Anlagen-Dateien gehen in die Übergabe ans Büro.'],
   ['1.5.0', '30.10.2026', 'Frau/Herr im Text ohne Einstellungen: Frau Dr. Pütt und Frau Jung, alle anderen aus dem Büro Herr (Einstellung geht vor; in der Unterschrift weiterhin ohne Anrede). Tabelle 1: Spalte „Probe“ nur mit der Nummer, Nummer und Labor-Nr. zentriert (samt Spaltenkopf), Textspalten linksbündig. Material: ist „Bauteil / Material“ in LabelKit leer, kommt es aus der Matrix (z. B. „Putz / Spachtelmasse“) – mit Hinweis.'],
@@ -233,13 +233,22 @@ async function quellenAuffrischen(anlass) {
   if (!jetzt || dir !== S.dir || lauf !== S.quellenLauf) return [];
   const geaendert = Object.keys(QUELLE_NAME).filter(k => jetzt[k] !== S.stempel[k]);
   if (!geaendert.length) return [];
+  const uhr = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
   let r;
   try { r = await quellenLesen(dir); }
-  catch (e) { fehler('Geänderte Projektdaten nicht lesbar: ' + (e && e.message || e)); return geaendert; }
+  catch (e) {
+    // Nicht lesbar (z. B. gerade in Arbeit): diesen Stand nicht immer wieder versuchen – der Bericht bleibt beim zuletzt gelesenen,
+    // das wird bleibend gemeldet; ändert sich die Datei erneut, wird wieder gelesen.
+    if (dir !== S.dir || lauf !== S.quellenLauf) return [];
+    S.stempel = jetzt;
+    meldung(`${geaendert.map(k => QUELLE_NAME[k]).join(', ')} geändert, aber nicht lesbar (${uhr}): ${e && e.message || e} – der Bericht nutzt weiter den vorher gelesenen Stand.`);
+    S.ungesehen = Date.now();
+    return geaendert;
+  }
   if (dir !== S.dir || lauf !== S.quellenLauf) return [];
   S.stempel = jetzt; quellenUebernehmen(r);
   vorgabenNeu();
-  const uhr = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  S.ungesehen = Date.now();
   meldung(`Daten neu gelesen${anlass === 'speichern' ? ' vor dem Speichern' : ''} (${uhr}): ${geaendert.map(k => QUELLE_NAME[k]).join(', ')} – die Vorschau zeigt jetzt den neuen Stand.`);
   if (window.MosaikLeiste) MosaikLeiste.aktualisieren();
   return geaendert;
@@ -453,7 +462,7 @@ async function zustandSchreiben(bericht) {
     z.text = text; z.berichte = berichte;
     const geschrieben = new Map(offen.map(p => [p, json(pfadWert(form, p))]));
     if (S.zustand === z && fremd && !V.gleich(form, S.eigen)) {   // Änderungen eines Kollegen sind jetzt auch hier
-      S.eigen = form; formNeu(); formLokal(); render();
+      S.eigen = mischen(form, S.eigen, [...z.offen]); formNeu(); formLokal(); render();   // während des Schreibens Getipptes bleibt
       $('status').textContent = `Angaben von ${datei.geaendertVon || 'einem Kollegen'} übernommen – Ihre Änderungen sind erhalten.`;
     }
     clearTimeout(z.pruef); z.pruef = setTimeout(() => zustandPruefen(dir, z, geschrieben).catch(() => {}), 2500);
@@ -485,8 +494,8 @@ async function zustandAbschliessen() {
 function formLokal() { try { localStorage.setItem(S.formKey, JSON.stringify({ v: 2, form: S.eigen })); } catch (e) { /* voll/gesperrt */ } }
 
 /* ---------- Modell ---------- */
-function modell() {
-  const da = S.anlagenVorhanden, form = { ...S.form, anlagenExtra: (S.form.anlagenExtra || []).map(x => ({ ...x, fehlt: !!da && !da.has(x.pfad) })) };
+function modell(ueber) {
+  const da = S.anlagenVorhanden, form = { ...S.form, ...(ueber || {}), anlagenExtra: (S.form.anlagenExtra || []).map(x => ({ ...x, fehlt: !!da && !da.has(x.pfad) })) };
   return T.bericht({ pj: S.pj, ordner: S.ordner, lk: S.lk, erg: S.erg, cfg: S.cfg, mitarbeiter: S.mitarbeiter, fotos: S.fotoListe, feldbogen: S.feldbogen, anlagen: S.anlagen, form });
 }
 
@@ -665,12 +674,16 @@ async function wordBlob(m) {
   const blob = await docx.Packer.toBlob(BerichtDocx.erstellen(docx, m, bilder));
   return { blob, m, fehlen };
 }
+const UNGESEHEN_MS = 3000;
 /** Vor dem Speichern/Herunterladen: geänderte Daten aus ResultKit, LabelKit, Projektzentrale? Dann erst ansehen lassen. */
 async function vorherNeuLesen(anlass) {
+  await (S.fokusLauf || Promise.resolve()).catch(() => {});   // gerade beim Zurückkommen ins Fenster neu gelesen? Erst abwarten.
   const geaendert = await quellenAuffrischen(anlass).catch(() => []);
   await anlagenLesen().catch(() => {}); render();   // Anlagen frisch: inzwischen in FotoKit/PlanKit erstellt oder geändert?
-  if (!geaendert.length) return false;
-  fehler('');
+  // Eben erst neu gelesen (Fokus und Klick fast gleichzeitig, z. B. direkt auf „Speichern“ aus ResultKit zurück): auch dann einmal anhalten
+  const ungesehen = S.ungesehen && Date.now() - S.ungesehen < UNGESEHEN_MS;
+  S.ungesehen = 0;
+  if (!geaendert.length && !ungesehen) return false;
   $('status').innerHTML = '<span class="warn">Die Daten haben sich inzwischen geändert – schau dir die Vorschau an und klick dann noch einmal.</span>';
   return true;
 }
@@ -686,20 +699,21 @@ async function speichern() {
   try {
     if (!(await erlaubt(S.dir, true))) throw new Error('Kein Schreibzugriff auf den Projektordner.');
     const ziel = await SO.unter(S.dir, ['Mitteilungen'], true);
-    let name = m0.dateiname;
+    let name = m0.dateiname, neueNr = 0;
     if (await dateiDa(ziel, name)) {
       // Datei gibt es schon: Ersetzen / daneben / abbrechen – ist sie schon beim Büro, wird nicht ersetzt
-      const buero = await beimBuero(name).catch(() => null), naechste = await naechsteMitteilung();
+      const buero = await beimBuero(name).catch(() => ({ unklar: true })), naechste = await naechsteMitteilung();
       const wahl = await ersetzenFragen(name, buero, naechste);
       if (wahl === 'abbrechen') { $('status').textContent = `Nicht gespeichert – „${name}“ ist unverändert.`; return; }
       if (wahl === 'daneben') name = await freierName(ziel, name);
-      if (wahl === 'naechste') {
-        S.form.mitteilung = naechste; formMerken('mitteilung'); render(); m0 = modell();
+      if (wahl === 'naechste') {   // Nummer erst nach allen Rückfragen übernehmen – bei Abbruch bleibt das Formular, wie es war
+        neueNr = naechste; m0 = modell({ mitteilung: naechste });
         if (m0.sperren.length) { fehler('Nicht gespeichert – ' + m0.sperren.join(' ')); return; }
         name = m0.dateiname; if (await dateiDa(ziel, name)) name = await freierName(ziel, name);
       }
     }
     if (m0.luecken.length && !confirm(`Im Bericht sind noch ${m0.luecken.length} Lücke(n) gelb markiert:\n${m0.luecken.join(', ')}\n\nTrotzdem speichern?`)) { render(); return; }
+    if (neueNr) { S.form.mitteilung = neueNr; S.form.mitteilungAm = new Date().toISOString(); formMerken('mitteilung', 'mitteilungAm'); render(); }
     $('status').textContent = 'Word-Datei wird erstellt …';
     const { blob, m, fehlen } = await wordBlob(m0);
     const fh = await ziel.getFileHandle(name, { create: true });
@@ -724,9 +738,10 @@ async function speichern() {
     Schon beim Büro: kein „Ersetzen“, stattdessen „Als n. Mitteilung speichern“. → 'ersetzen' | 'daneben' | 'naechste' | 'abbrechen' */
 function ersetzenFragen(name, buero, naechste) {
   const d = $('dlgErsetzen'), am = buero && Date.parse(buero.erstellt) ? tagDE(Date.parse(buero.erstellt)) : '';
-  $('ersTitel').textContent = buero ? 'Schon beim Büro' : 'Datei gibt es schon';
+  $('ersTitel').textContent = buero ? (buero.unklar ? 'Büro-Stand unklar' : 'Schon beim Büro') : 'Datei gibt es schon';
   $('ersText').textContent = buero
-    ? `„${name}“ ist schon beim Büro${am ? ` (übergeben am ${am})` : ''} – als nächste Mitteilung speichern?`
+    ? (buero.unklar ? `Ob „${name}“ schon beim Büro ist, ließ sich nicht prüfen – als nächste Mitteilung speichern?`
+      : `„${name}“ ist schon beim Büro${am ? ` (übergeben am ${am})` : ''} – als nächste Mitteilung speichern?`)
     : `„${name}“ gibt es schon in „Mitteilungen“. Was soll passieren?`;
   $('ersErkl').innerHTML = [
     buero ? `<li><b>Als ${naechste}. Mitteilung speichern</b>: neuer Bericht mit der Nummer ${naechste}, der übergebene bleibt unverändert.</li>`
@@ -752,9 +767,19 @@ async function beimBuero(datei) {
         const x = await lies(h, f.name); if (!x || x.format !== 'spektron-buerokit' || x.version !== 1) continue;
         if (x.typ === 'aufgabe') aufgaben.push(x); else if (x.typ === 'vermerk') vermerke.push(x);
       }
-    } else {   // frühere Büroübergaben der Projektzentrale (bis 1.27): <id>/auftrag.json
+    } else {   // frühere Büroübergaben der Projektzentrale (bis 1.27): <id>/auftrag.json + rueckmeldung-*.json (wie buero-aufgaben.js altLesen)
       const x = await lies(h, 'auftrag.json');
-      if (x && x.format === 'spektron-buero' && x.content) aufgaben.push({ id: x.id, art: 'gutachten', word: x.content.word, erstellt: x.created });
+      if (!x || x.format !== 'spektron-buero' || !x.content) continue;
+      const a = { id: x.id, art: 'gutachten', word: x.content.word, erstellt: x.created }, ev = [];
+      for await (const f of h.values()) if (f.kind === 'file' && /^rueckmeldung-[0-9a-zA-Z-]+\.json$/.test(f.name)) {
+        const e = await lies(h, f.name); if (e && e.format === 'spektron-buero' && e.orderId === x.id && e.payload) ev.push(e);
+      }
+      ev.sort((p, q) => String(p.at).localeCompare(String(q.at)) || String(p.id).localeCompare(String(q.id)));
+      for (const e of ev) {
+        if (e.type === 'revise' && e.payload.content && e.payload.content.word) a.word = e.payload.content.word;
+        if (e.type === 'withdraw') vermerke.push({ id: String(e.id), aufgabe: x.id, schritt: 'geloescht', wert: true, zeit: e.at });
+      }
+      aufgaben.push(a);
     }
   }
   return V.beimBuero(aufgaben, vermerke, datei);
@@ -826,7 +851,7 @@ function verbinden() {
   $('eAbbrechen').onclick = () => $('dlgEinstellungen').close(); $('eSpeichern').onclick = einstellungenSpeichern;
   $('btnErstellen').onclick = speichern; $('btnLaden').onclick = herunterladen;
   $('fDatum').onchange = e => setze('datum', e.target.value);
-  $('fMitteilung').onchange = e => setze('mitteilung', Math.max(1, +e.target.value || 1));
+  $('fMitteilung').onchange = e => { S.form.mitteilung = Math.max(1, +e.target.value || 1); S.form.mitteilungAm = new Date().toISOString(); formMerken('mitteilung', 'mitteilungAm'); render(); };
   $('fEingang').onchange = e => setze('eingangsdatum', e.target.value);
   $('fAuftrag').onchange = e => setze('auftragsdatum', e.target.value);
   $('fAg').oninput = e => { S.form.agSatz = e.target.value; formMerken('agSatz'); vorschau(modell()); };
@@ -864,7 +889,12 @@ function verbinden() {
   });
   $('btnAnlageDazu').onclick = anlageHinzufuegen;
   // Zurück aus ResultKit, LabelKit, Projektzentrale, FotoKit, PlanKit: geänderte Daten und neu erstellte Anlagen gleich sehen
-  window.addEventListener('focus', () => { if (S.dir && !S.laedt && !S.speichert) Promise.all([quellenAuffrischen('fokus'), anlagenLesen()]).then(render).catch(() => {}); });
+  // Neu gezeichnet wird nur bei einer Änderung – sonst bliebe z. B. „Nicht gespeichert …“ nach einem Dialog nicht stehen
+  window.addEventListener('focus', () => {
+    if (!S.dir || S.laedt || S.speichert) return;
+    const anl = () => V.stabil([S.anlagen, [...(S.anlagenVorhanden || [])]]), vorher = anl();
+    S.fokusLauf = Promise.all([quellenAuffrischen('fokus'), anlagenLesen()]).then(([g]) => { if (g.length || anl() !== vorher) render(); }).catch(() => {});
+  });
   $('btnMeldungenWeg').onclick = () => { S.meldungen = []; meldungenZeigen(); };
   window.addEventListener('hashchange', () => { const n = PROJEKT_URL.lesen(); if (n && (!S.dir || n !== S.dir.name)) start(); });
 }

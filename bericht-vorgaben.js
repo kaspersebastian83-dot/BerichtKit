@@ -7,10 +7,15 @@
 
    formBereinigen – beim Öffnen und für Dateien ohne Kennzeichen:
    1. Mitteilung Nr. n gibt es schon (n < nächste freie) → die Nummer fällt weg, vorgeschlagen ist die nächste freie.
+      Ausnahme: Die Nummer wurde bewusst gesetzt (mitteilungAm) und seitdem kein Bericht mit dieser Nummer gespeichert –
+      z. B. hat ein Kollege die Nummer zurückgestellt, um die Mitteilung zu ersetzen. Dann bleibt sie (beim Speichern fragt der Dialog).
    2. Berichtsdatum fällt weg, wenn es zu einer schon gespeicherten Mitteilung mit anderer Nummer gehört (berichte[]),
       bei einer Datei ohne Kennzeichen auch, wenn es vor heute liegt (eingefroren beim ersten Bearbeiten).
    3. Datei ohne Kennzeichen: leere Werte und Werte gleich der heutigen Vorgabe sind keine eigenen Angaben (fallen weg);
-      alles andere bleibt als eigene Angabe – lieber eine Angabe zu viel behalten als eine echte Eingabe verlieren. */
+      alles andere bleibt als eigene Angabe – lieber eine Angabe zu viel behalten als eine echte Eingabe verlieren. Was bleibt
+      und von einer Vorgabe aus den Projektdaten abweicht, nennt ein Hinweis (es könnte eine alte, eingefrorene Vorgabe sein). */
+const FELD_NAME = { auftragsdatum: 'Auftragsdatum', agSatz: 'Auftraggeber im Satz', probenehmer: 'Probenahme durch', sv: 'Unterschrift',
+  mt: 'Zweite Unterschrift', labor: 'Labor' };   // nur Vorgaben aus Projektzentrale, LabelKit und Einstellungen
 (function (root) {
 'use strict';
 
@@ -39,9 +44,10 @@ function formBereinigen(form, ctx) {
   const weg = k => { delete out[k]; entfernt.push(k); };
   // 1. Nummer schon vergeben
   if (out.mitteilung != null && out.mitteilung !== '') {
-    const n = +out.mitteilung;
-    if (!(n >= 1) || n < naechste) {
-      weg('mitteilung');
+    const n = +out.mitteilung, am = Date.parse(out.mitteilungAm || '');
+    const bewusst = n >= 1 && Number.isFinite(am) && !(c.berichte || []).some(b => b && +b.mitteilung === n && !(Date.parse(b.am) < am));
+    if (!(n >= 1) || (n < naechste && !bewusst)) {
+      weg('mitteilung'); if ('mitteilungAm' in out) weg('mitteilungAm');
       if (n >= 1) hinweise.push(`Die ${n}. Mitteilung gibt es schon in „Mitteilungen“ – vorgeschlagen ist jetzt die ${naechste}. Mitteilung. Willst du die ${n}. ersetzen, stell die Nummer wieder auf ${n}.`);
     }
   }
@@ -56,7 +62,11 @@ function formBereinigen(form, ctx) {
     }
   }
   // 3. Alte Datei: Vorgaben und leere Werte sind keine eigenen Angaben
-  if (c.alt) for (const k of Object.keys(out)) if (leer(out[k]) || (k in vorgabe && gleich(out[k], vorgabe[k]))) weg(k);
+  if (c.alt) {
+    for (const k of Object.keys(out)) if (leer(out[k]) || (k in vorgabe && gleich(out[k], vorgabe[k]))) weg(k);
+    const abweichend = Object.keys(FELD_NAME).filter(k => k in out && k in vorgabe);
+    if (abweichend.length) hinweise.push(`Aus den früheren Angaben übernommen, weicht von den Projektdaten ab: ${abweichend.map(k => FELD_NAME[k]).join(', ')} – bitte prüfen.`);
+  }
   return { form: out, entfernt, hinweise };
 }
 

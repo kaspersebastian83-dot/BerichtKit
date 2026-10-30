@@ -209,8 +209,13 @@ const daten = {
     assert.match(await page.textContent('#meldungen'), /Daten neu gelesen vor dem Speichern \(\d\d:\d\d\): Laborergebnisse \(ResultKit\)/);
     assert.ok(!(await page.evaluate(() => document.getElementById('dlgErsetzen').open)), 'noch keine Rückfrage');
     assert.equal(await projektDatei('Mitteilungen/1._Mitteilung_99.9001.docx'), 'alt');
+    // Fokus und Klick fast gleichzeitig (zurück aus ResultKit, gleich auf „Speichern“): auch dann einmal anhalten
     await projektDatei(ergPfad, ergAlt); await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.click('#btnErstellen');
     await page.waitForFunction(() => /Chrysotil, 5 - 20 %/.test(document.getElementById('vorschau').textContent));
+    await page.waitForSelector('#status .warn');
+    assert.ok(!(await page.evaluate(() => document.getElementById('dlgErsetzen').open)), 'erst ansehen');
+    assert.equal(await projektDatei('Mitteilungen/1._Mitteilung_99.9001.docx'), 'alt');
     const ersetzen = async () => { await page.click('#btnErstellen'); await page.waitForSelector('#dlgErsetzen[open]'); };
     await ersetzen();
     assert.match(await page.textContent('#ersText'), /„1\._Mitteilung_99\.9001\.docx“ gibt es schon in „Mitteilungen“\. Was soll passieren\?/);
@@ -310,6 +315,7 @@ const daten = {
     assert.equal(await page.inputValue('#fDatum'), heuteISO); assert.equal(await page.inputValue('#fMitteilung'), '3');
     assert.equal(await page.inputValue('#fLabor'), 'Eurofins Beispiel-Labor GmbH', 'leeres Labor war eingefroren – jetzt aus den Einstellungen');
     assert.match(await page.textContent('#meldungen'), /Berichtsdatum war seit dem ersten Bearbeiten auf dem 01\.10\.2026 stehen geblieben/);
+    assert.match(await page.textContent('#meldungen'), /weicht von den Projektdaten ab: Probenahme durch, Zweite Unterschrift – bitte prüfen\./);
     let neuGeschrieben = null;
     for (let i = 0; i < 40 && !(neuGeschrieben && neuGeschrieben.nurEigene); i++) { await page.waitForTimeout(150); neuGeschrieben = JSON.parse(await projektDatei(bkPfad)); }
     // Vorgaben und Leeres fallen weg; was von der heutigen Vorgabe abweicht (Probenehmer, zweite Unterschrift), bleibt als eigene Angabe

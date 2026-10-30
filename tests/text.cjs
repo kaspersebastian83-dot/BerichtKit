@@ -352,6 +352,11 @@ fall('Nächste Mitteilung: gespeicherte Nummer gibt es schon → nächste freie,
   assert.deepEqual(V.formBereinigen({ mitteilung: 3, datum: '2026-10-29' }, ctx({ berichte })).form, { mitteilung: 3, datum: '2026-10-29' });
   // Datum gehört zur Mitteilung, die gerade bearbeitet wird (Nummer selbst zurückgestellt) → bleibt
   assert.equal(V.formBereinigen({ mitteilung: 2, datum: '2026-10-28' }, ctx({ berichte: [{ mitteilung: 2, datum: '2026-10-28' }] })).form.datum, '2026-10-28');
+  // Bewusst zurückgestellt (Kollege will die 1. ersetzen), seitdem nicht gespeichert → bleibt; danach gespeichert → nächste freie
+  const zurueck = { mitteilung: 1, mitteilungAm: '2026-10-30T12:00:00.000Z' };
+  assert.deepEqual(V.formBereinigen(zurueck, ctx({ berichte: [{ mitteilung: 1, am: '2026-10-29T09:00:00.000Z' }] })).form, zurueck);
+  const gespeichert = V.formBereinigen(zurueck, ctx({ berichte: [{ mitteilung: 1, am: '2026-10-30T12:05:00.000Z' }] }));
+  assert.deepEqual(gespeichert.form, {}); assert.deepEqual(gespeichert.entfernt, ['mitteilung', 'mitteilungAm']);
 });
 
 fall('Übergang: _BerichtKit.json bis 1.6.1 (ganzes Formular) wird bereinigt', () => {
@@ -361,6 +366,7 @@ fall('Übergang: _BerichtKit.json bis 1.6.1 (ganzes Formular) wird bereinigt', (
   // eingefroren: Datum vom ersten Bearbeiten, vergebene Nummer, leeres Labor (Einstellungen kamen später), Vorgaben-Werte
   assert.deepEqual(r.form, { agSatz: 'die Beispiel Versicherung AG (Regionaldirektion)', aus: { P2: false }, pnQuelle: 'hand' });
   assert.ok(r.hinweise.some(h => /^Die 1\. Mitteilung gibt es schon/.test(h)));
+  assert.ok(r.hinweise.some(h => h === 'Aus den früheren Angaben übernommen, weicht von den Projektdaten ab: Auftraggeber im Satz – bitte prüfen.'));
   assert.ok(r.hinweise.some(h => /Berichtsdatum war seit dem ersten Bearbeiten auf dem 20\.10\.2026 stehen geblieben – jetzt steht das heutige Datum da\. Brauchst du ein anderes, trag es ein\./.test(h)));
   // noch nichts gespeichert (Nummer 1 frei), Datum heute: still bereinigt, kein Hinweis
   const r2 = V.formBereinigen({ ...VORGABE, mitteilung: 1, datum: '2026-11-05' }, ctx({ alt: true, naechste: 1, vorgabe: { ...VORGABE, mitteilung: 1 } }));

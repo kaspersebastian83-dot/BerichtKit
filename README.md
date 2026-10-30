@@ -28,9 +28,11 @@ Die Ablageorte im Projekt bestimmt das gemeinsame Modul `spektron-ordner.js` (Be
 - **Gemeinsame Angaben:** Was im Formular selbst geändert wird, liegt in `_BerichtKit.json` im Projekt und gilt für alle Kollegen. Hat jemand inzwischen gespeichert, lädt BerichtKit dessen Stand und meldet es – nichts wird stumm überschrieben. Dazu die Liste der gespeicherten Berichte (Datei, Zeit, Kürzel aus „Ich bin …“, Mitteilung-Nr., Berichtsdatum).
 - **Vorgaben werden nicht eingefroren** (`bericht-vorgaben.js`): Heutiges Datum, nächste freie Mitteilung, Auftragsdatum und Auftraggeber
   (Projektzentrale), Probenehmer (LabelKit), Labor (Einstellungen) werden bei jedem Öffnen neu berechnet; in der Datei stehen nur selbst
-  geänderte Felder (`nurEigene: true`). Gibt es die gespeicherte Mitteilung-Nr. schon in „Mitteilungen“, wird die nächste freie vorgeschlagen;
+  geänderte Felder (`nurEigene: true`). Gibt es die gespeicherte Mitteilung-Nr. schon in „Mitteilungen“, wird die nächste freie vorgeschlagen
+  (außer die Nummer wurde bewusst zurückgestellt – `mitteilungAm` – und seitdem kein Bericht mit ihr gespeichert);
   ein Datum, das zu einer schon gespeicherten Mitteilung gehört, weicht dem heutigen – beides mit Hinweis. Ältere Dateien (bis 1.6.1, ganzes
-  Formular) werden beim Öffnen bereinigt: leere Werte, Werte gleich der heutigen Vorgabe und ein Datum vor heute fallen weg, alles andere bleibt.
+  Formular) werden beim Öffnen bereinigt: leere Werte, Werte gleich der heutigen Vorgabe und ein Datum vor heute fallen weg, alles andere bleibt
+  (Hinweis nennt die Felder, die von den Projektdaten abweichen).
 - **Daten neu lesen:** `_Projekt.json`, die LabelKit-Datei und `_Ergebnisse.json` werden beim Zurückkommen ins Fenster (z. B. nach „Übernehmen“
   in ResultKit) und vor dem Speichern/Herunterladen verglichen (Name, Größe, Änderungszeit) und bei Änderung neu gelesen – mit bleibendem Hinweis
   „Daten neu gelesen: …“. Vor dem Speichern hält BerichtKit dann an: erst die neue Vorschau ansehen, dann noch einmal klicken.
