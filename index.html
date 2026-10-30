@@ -32,6 +32,8 @@ header h1{font-size:15px;font-weight:600;margin:0;white-space:nowrap}
 header .projekt{font-family:var(--mono);font-size:12px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.25);border-radius:4px;padding:3px 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:46vw}
 header .rechts{margin-left:auto;display:flex;gap:8px;align-items:center}
 header button{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.3);color:#fff;padding:4px 11px;font-size:13px}
+header a.knopf{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.3);color:#fff;padding:4px 11px;font-size:13px;border-radius:7px;text-decoration:none}
+header a.knopf:hover{background:rgba(255,255,255,.22);border-color:#fff}
 header button:hover{background:rgba(255,255,255,.22);color:#fff;border-color:#fff}
 header .version{font-family:var(--mono);font-size:11px;opacity:.8}
 main{flex:1;display:grid;grid-template-columns:minmax(380px,460px) 1fr;gap:18px;padding:18px 20px 90px;max-width:1500px;width:100%;margin:0 auto}
@@ -101,6 +103,7 @@ dialog .knoepfe{display:flex;justify-content:flex-end;gap:8px;padding:12px 22px;
   <span class="projekt" id="kopfProjekt">kein Projekt geöffnet</span>
   <div class="rechts">
     <span class="version" id="version"></span>
+    <a class="knopf" id="lnkHandbuch" href="../aidkit/#app-berichtkit" target="aidkit" rel="noopener" title="Handbuch: BerichtKit Schritt für Schritt – öffnet AidKit in einem eigenen Fenster">📘 Handbuch</a>
     <button id="btnEinstellungen" title="Personen, Rollen und Labor – gilt für das ganze Büro">Einstellungen</button>
     <button id="btnOrdner" title="Anderen Projektordner wählen">Projekt wählen</button>
   </div>

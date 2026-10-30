@@ -6,7 +6,7 @@
 const APP_VERSION = '1.1.0';
 const APP_DATE = '30.10.2026';
 const CHANGELOG = [
-  ['1.1.0', '30.10.2026', 'Teil der Spektron-Suite: Spektron-Leiste oben (Projekt, Arbeitsschritte, Weiter), Angaben zum Bericht gemeinsam für alle im Projektordner („_Spektron/BerichtKit/_BerichtKit.json“, ältere Projekte „Mitteilungen“), offline nutzbar.'],
+  ['1.1.0', '30.10.2026', 'Teil der Spektron-Suite: Spektron-Leiste oben (Projekt, Arbeitsschritte, Weiter), Knopf „📘 Handbuch“ (AidKit-Kapitel „BerichtKit Schritt für Schritt“), Angaben zum Bericht gemeinsam für alle im Projektordner („_Spektron/BerichtKit/_BerichtKit.json“, ältere Projekte „Mitteilungen“), offline nutzbar.'],
   ['1.0.0', '30.10.2026', 'Erste Fassung: Asbest-Untersuchungsbericht (Mitteilung) aus Projektzentrale, LabelKit, ResultKit und FotoKit – Vorschau, Lücken gelb, Word-Datei in „Mitteilungen“.'],
 ];
 const SO = globalThis.SpektronOrdner, T = globalThis.BerichtText;

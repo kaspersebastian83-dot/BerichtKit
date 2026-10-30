@@ -26,6 +26,7 @@ Die Ablageorte im Projekt bestimmt das gemeinsame Modul `spektron-ordner.js` (Be
 - **Spektron-Leiste** oben (`mosaik-leiste.js`, Block byte-gleich mit LabelKit, FotoKit, ResultKit, PlanKit, BelegKit): BerichtKit ist der Schritt nach PlanKit; Haken, sobald ein Bericht `<n>._Mitteilung_<Nr>.docx` in „Mitteilungen“ liegt.
 - **Gemeinsame Angaben:** Was im Formular eingestellt wird, liegt in `_BerichtKit.json` im Projekt und gilt für alle Kollegen. Hat jemand inzwischen gespeichert, lädt BerichtKit dessen Stand und meldet es – nichts wird stumm überschrieben. Dazu die Liste der gespeicherten Berichte (Datei, Zeit, Kürzel aus „Ich bin …“).
 - **Offline:** Service Worker „Netz zuerst“ wie in der Projektzentrale (`sw.js`).
+- **Handbuch:** Knopf „📘 Handbuch“ öffnet AidKit, Kapitel `#app-berichtkit` („BerichtKit Schritt für Schritt“).
 
 ## Regeln
 
