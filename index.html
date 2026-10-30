@@ -119,6 +119,13 @@ dialog table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
 dialog th{text-align:left;color:var(--muted);font-weight:600;font-size:12px;padding:4px}
 dialog td{padding:4px;border-top:1px solid var(--line)}
 dialog .knoepfe{display:flex;justify-content:flex-end;gap:8px;padding:12px 22px;border-top:1px solid var(--line);background:var(--panel2);border-radius:0 0 12px 12px}
+#dlgErsetzen{max-width:600px}
+#dlgErsetzen ul{margin:8px 0 0;padding-left:18px;font-size:13px;line-height:1.5}
+#dlgErsetzen .warnung{color:var(--err);border-color:#f1c4bd}
+.meldungen{background:#fff8e1;border:1px solid #f0d58a;border-radius:8px;padding:8px 12px;margin-bottom:14px;font-size:13px;display:flex;gap:10px;align-items:flex-start}
+.meldungen ul{margin:0;padding-left:18px;flex:1}
+.meldungen li+li{margin-top:4px}
+.warn{color:#8a5a00;font-weight:600}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -146,6 +153,7 @@ dialog .knoepfe{display:flex;justify-content:flex-end;gap:8px;padding:12px 22px;
 <main id="app" hidden>
   <section>
     <div id="fehler" class="fehler" hidden></div>
+    <div id="meldungen" class="meldungen" role="status" hidden><ul id="meldungenListe"></ul><button type="button" class="klein-knopf" id="btnMeldungenWeg" title="Hinweise ausblenden">Ausblenden</button></div>
     <div class="karte">
       <h2>Bericht</h2>
       <div class="feld"><label for="fDatum">Berichtsdatum</label><input type="date" id="fDatum"></div>
@@ -213,9 +221,26 @@ dialog .knoepfe{display:flex;justify-content:flex-end;gap:8px;padding:12px 22px;
   <div class="knoepfe"><button id="eAbbrechen">Abbrechen</button><button class="primary" id="eSpeichern">Speichern</button></div>
 </dialog>
 
+<dialog id="dlgErsetzen" aria-labelledby="ersTitel">
+  <form method="dialog">
+    <div class="innen">
+      <h2 id="ersTitel">Datei gibt es schon</h2>
+      <p id="ersText" style="margin:6px 0 0"></p>
+      <ul id="ersErkl"></ul>
+    </div>
+    <div class="knoepfe">
+      <button value="ersetzen" id="ersErsetzen" class="warnung">Ersetzen</button>
+      <button value="naechste" id="ersNaechste" class="primary" hidden>Als nächste Mitteilung speichern</button>
+      <button value="daneben" id="ersDaneben">Daneben als „(2)“ speichern</button>
+      <button value="abbrechen" id="ersAbbrechen" autofocus>Abbrechen</button>
+    </div>
+  </form>
+</dialog>
+
 <script src="vendor/docx.iife.js"></script>
 <script src="spektron-ordner.js"></script>
 <script src="anlagen.js"></script>
+<script src="bericht-vorgaben.js"></script>
 <script src="bericht-text.js"></script>
 <script src="bericht-docx.js"></script>
 <script src="mosaik-leiste.js"></script>

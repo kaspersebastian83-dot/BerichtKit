@@ -25,14 +25,24 @@ Die Ablageorte im Projekt bestimmt das gemeinsame Modul `spektron-ordner.js` (Be
 
 - **Projektzentrale:** Knopf „Asbestbericht“ in Stufe 4 (Gutachten) öffnet BerichtKit mit dem Projekt (`#projekt=<Ordnername>`).
 - **Spektron-Leiste** oben (`mosaik-leiste.js`, Block byte-gleich mit LabelKit, FotoKit, ResultKit, PlanKit, BelegKit): BerichtKit ist der Schritt nach PlanKit; Haken, sobald ein Bericht `<n>._Mitteilung_<Nr>.docx` in „Mitteilungen“ liegt.
-- **Gemeinsame Angaben:** Was im Formular eingestellt wird, liegt in `_BerichtKit.json` im Projekt und gilt für alle Kollegen. Hat jemand inzwischen gespeichert, lädt BerichtKit dessen Stand und meldet es – nichts wird stumm überschrieben. Dazu die Liste der gespeicherten Berichte (Datei, Zeit, Kürzel aus „Ich bin …“).
+- **Gemeinsame Angaben:** Was im Formular selbst geändert wird, liegt in `_BerichtKit.json` im Projekt und gilt für alle Kollegen. Hat jemand inzwischen gespeichert, lädt BerichtKit dessen Stand und meldet es – nichts wird stumm überschrieben. Dazu die Liste der gespeicherten Berichte (Datei, Zeit, Kürzel aus „Ich bin …“, Mitteilung-Nr., Berichtsdatum).
+- **Vorgaben werden nicht eingefroren** (`bericht-vorgaben.js`): Heutiges Datum, nächste freie Mitteilung, Auftragsdatum und Auftraggeber
+  (Projektzentrale), Probenehmer (LabelKit), Labor (Einstellungen) werden bei jedem Öffnen neu berechnet; in der Datei stehen nur selbst
+  geänderte Felder (`nurEigene: true`). Gibt es die gespeicherte Mitteilung-Nr. schon in „Mitteilungen“, wird die nächste freie vorgeschlagen;
+  ein Datum, das zu einer schon gespeicherten Mitteilung gehört, weicht dem heutigen – beides mit Hinweis. Ältere Dateien (bis 1.6.1, ganzes
+  Formular) werden beim Öffnen bereinigt: leere Werte, Werte gleich der heutigen Vorgabe und ein Datum vor heute fallen weg, alles andere bleibt.
+- **Daten neu lesen:** `_Projekt.json`, die LabelKit-Datei und `_Ergebnisse.json` werden beim Zurückkommen ins Fenster (z. B. nach „Übernehmen“
+  in ResultKit) und vor dem Speichern/Herunterladen verglichen (Name, Größe, Änderungszeit) und bei Änderung neu gelesen – mit bleibendem Hinweis
+  „Daten neu gelesen: …“. Vor dem Speichern hält BerichtKit dann an: erst die neue Vorschau ansehen, dann noch einmal klicken.
 - **Offline:** Service Worker „Netz zuerst“ wie in der Projektzentrale (`sw.js`).
 - **Handbuch:** Knopf „📘 Handbuch“ öffnet AidKit, Kapitel `#app-berichtkit` („BerichtKit Schritt für Schritt“).
 
 ## Regeln
 
 - **Nur lesen** – BerichtKit ändert keine Projektdatei der anderen Apps (Anlagen werden nur gefunden, nie verschoben oder umbenannt). Es schreibt nur die Word-Datei nach `Mitteilungen/`
-  (vorhandene Datei: Rückfrage, sonst „… (2).docx“), seine eigenen Angaben (`_BerichtKit.json`) und die Einstellungen in den Archivordner.
+  (vorhandene Datei: Dialog „Ersetzen“ / „Daneben als (2) speichern“ / „Abbrechen“ – Abbrechen ist der Standard; nennt eine Büroaufgabe die Datei
+  schon, gibt es statt „Ersetzen“ nur „Als nächste Mitteilung speichern“), seine eigenen Angaben (`_BerichtKit.json`) und die Einstellungen in den Archivordner.
+  Die Büroaufgaben (`_Spektron/Buero`, bzw. `_Buero`) werden dafür nur gelesen.
 - **Laborwerte und Probenbezeichnungen werden nie bearbeitet.** Ergebnistexte kommen wörtlich aus dem Prüfbericht (über ResultKit).
   Einzige Ausnahme: ein KI-Wert, der nicht in den Labordaten steht, kann aus dem PDF eingetragen werden (im Formular markiert).
 - **Nichts wird erfunden.** Fehlt eine Angabe, steht sie im Bericht als gelb markierte Lücke, z. B. `[Auftragsdatum]`.

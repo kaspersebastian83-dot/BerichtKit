@@ -319,4 +319,65 @@ fall('Raum-Kürzel in der Entnahmestelle werden für den Bericht ausgeschrieben 
   assert.ok(!m2.hinweise.some(h => /Abkürzungen ausgeschrieben/.test(h)));
 });
 
+/* ---------- Vorgaben und eigene Angaben (bericht-vorgaben.js) ---------- */
+const V = require('../bericht-vorgaben.js');
+const VORGABE = { datum: '2026-11-05', mitteilung: 2, variante: 'eigen', eingangsdatum: '', auftragsdatum: '2026-10-05', agSatz: 'die Beispiel Versicherung AG',
+  probenehmer: 'Mes', sv: 'Tst', mt: 'Mes', labor: 'Eurofins Beispiel-Labor GmbH', einbau: 'unbekannt', aus: {}, kmf: {}, who: {}, ki: {}, foto: {} };
+const ctx = (o = {}) => ({ vorgabe: VORGABE, naechste: 2, heute: '2026-11-05', alt: false, berichte: [], ...o });
+
+fall('Nächste Mitteilung aus den Dateinamen in „Mitteilungen“', () => {
+  assert.equal(V.naechsteNr([]), 1);
+  assert.equal(V.naechsteNr(['1._Mitteilung_26.0512.docx', '1._Mitteilung_26.0512 (2).docx', '26.0512_Raumbuch_2026-10-30.docx', 'Anlage 1.pdf']), 2);
+  assert.equal(V.naechsteNr(['1. Mitteilung 26.0512.docx', '2__Mitteilung.docx', '3._Mitteilungen.docx']), 3, '„Mitteilungen“ ist keine Mitteilung');
+  assert.equal(V.mitteilungNr('12._Mitteilung_26.0512.docx'), 12);
+});
+
+fall('Datum und Nummer werden nicht eingefroren: neue Datei enthält nur eigene Angaben', () => {
+  // Nichts selbst geändert → nichts Eigenes, alles kommt aus den Vorgaben
+  assert.deepEqual(V.formBereinigen({}, ctx()), { form: {}, entfernt: [], hinweise: [] });
+  // Selbst gesetztes späteres Datum und freie Nummer bleiben
+  const r = V.formBereinigen({ datum: '2026-10-28', mitteilung: 2, probenehmer: 'Vom' }, ctx());
+  assert.deepEqual(r.form, { datum: '2026-10-28', mitteilung: 2, probenehmer: 'Vom' }); assert.deepEqual(r.hinweise, []);
+  // Neue Datei: auch ein früheres Datum ohne gespeicherten Bericht bleibt (selbst eingetragen)
+  assert.equal(V.formBereinigen({ datum: '2026-10-01' }, ctx()).form.datum, '2026-10-01');
+});
+
+fall('Nächste Mitteilung: gespeicherte Nummer gibt es schon → nächste freie, Datum der alten Mitteilung fällt weg', () => {
+  const berichte = [{ datei: '1._Mitteilung_99.9001.docx', mitteilung: 1, datum: '2026-10-28' }];
+  const r = V.formBereinigen({ datum: '2026-10-28', mitteilung: 1, einbau: 'vor1996' }, ctx({ berichte }));
+  assert.deepEqual(r.form, { einbau: 'vor1996' }); assert.deepEqual(r.entfernt, ['mitteilung', 'datum']);
+  assert.match(r.hinweise[0], /^Die 1\. Mitteilung gibt es schon in „Mitteilungen“ – vorgeschlagen ist jetzt die 2\. Mitteilung\. Willst du die 1\. ersetzen, stell die Nummer wieder auf 1\.$/);
+  assert.match(r.hinweise[1], /Berichtsdatum 28\.10\.2026 gehörte zur 1\. Mitteilung – jetzt steht das heutige Datum da\./);
+  // Nummer selbst auf die übernächste gesetzt: bleibt; Datum gehört zu keiner anderen Nummer: bleibt
+  assert.deepEqual(V.formBereinigen({ mitteilung: 3, datum: '2026-10-29' }, ctx({ berichte })).form, { mitteilung: 3, datum: '2026-10-29' });
+  // Datum gehört zur Mitteilung, die gerade bearbeitet wird (Nummer selbst zurückgestellt) → bleibt
+  assert.equal(V.formBereinigen({ mitteilung: 2, datum: '2026-10-28' }, ctx({ berichte: [{ mitteilung: 2, datum: '2026-10-28' }] })).form.datum, '2026-10-28');
+});
+
+fall('Übergang: _BerichtKit.json bis 1.6.1 (ganzes Formular) wird bereinigt', () => {
+  const alt = { ...VORGABE, datum: '2026-10-20', mitteilung: 1, labor: '', mt: '', agSatz: 'die Beispiel Versicherung AG (Regionaldirektion)',
+    auftragsdatum: '2026-10-05', aus: { P2: false }, rolle1: '', deckblatt: '', pnQuelle: 'hand' };
+  const r = V.formBereinigen(alt, ctx({ alt: true }));
+  // eingefroren: Datum vom ersten Bearbeiten, vergebene Nummer, leeres Labor (Einstellungen kamen später), Vorgaben-Werte
+  assert.deepEqual(r.form, { agSatz: 'die Beispiel Versicherung AG (Regionaldirektion)', aus: { P2: false }, pnQuelle: 'hand' });
+  assert.ok(r.hinweise.some(h => /^Die 1\. Mitteilung gibt es schon/.test(h)));
+  assert.ok(r.hinweise.some(h => /Berichtsdatum war seit dem ersten Bearbeiten auf dem 20\.10\.2026 stehen geblieben – jetzt steht das heutige Datum da\. Brauchst du ein anderes, trag es ein\./.test(h)));
+  // noch nichts gespeichert (Nummer 1 frei), Datum heute: still bereinigt, kein Hinweis
+  const r2 = V.formBereinigen({ ...VORGABE, mitteilung: 1, datum: '2026-11-05' }, ctx({ alt: true, naechste: 1, vorgabe: { ...VORGABE, mitteilung: 1 } }));
+  assert.deepEqual(r2.form, {}); assert.deepEqual(r2.hinweise, []);
+  // ein Datum in der Zukunft war gewollt
+  assert.equal(V.formBereinigen({ datum: '2026-11-20' }, ctx({ alt: true })).form.datum, '2026-11-20');
+});
+
+fall('Schon beim Büro: Büroaufgabe nennt die Datei (zurückgezogene zählen nicht)', () => {
+  const a = [{ id: 'a1', art: 'gutachten', word: 'Mitteilungen/1._Mitteilung_99.9001.docx', erstellt: '2026-10-30T10:00:00Z' },
+    { id: 'a2', art: 'eigene', word: 'Mitteilungen/2._Mitteilung_99.9001.docx', erstellt: '2026-10-30T11:00:00Z' }];
+  assert.equal(V.beimBuero(a, [], '1._MITTEILUNG_99.9001.docx').id, 'a1');
+  assert.equal(V.beimBuero(a, [], '2._Mitteilung_99.9001.docx'), null, 'nur Gutachten');
+  assert.equal(V.beimBuero(a, [], '3._Mitteilung_99.9001.docx'), null);
+  const weg = [{ id: 'v1', aufgabe: 'a1', schritt: 'geloescht', wert: true, zeit: '2026-10-30T12:00:00Z' }];
+  assert.equal(V.beimBuero(a, weg, '1._Mitteilung_99.9001.docx'), null, 'zurückgezogen');
+  assert.equal(V.beimBuero(a, [...weg, { id: 'v2', aufgabe: 'a1', schritt: 'geloescht', wert: false, zeit: '2026-10-30T13:00:00Z' }], '1._Mitteilung_99.9001.docx').id, 'a1', 'wieder aufgenommen');
+});
+
 console.log(`\n${n} Fälle bestanden.`);
