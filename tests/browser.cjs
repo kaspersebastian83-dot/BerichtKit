@@ -135,6 +135,25 @@ const daten = {
     assert.equal(zustand.format, 'spektron-bericht'); assert.equal(zustand.projekt, '99.9001');
     assert.equal(zustand.form.probenehmer, 'Mes'); assert.equal(zustand.form.einbau, 'vor1996');
     assert.deepEqual(zustand.berichte.map(b => b.datei), ['1._Mitteilung_99.9001.docx']);
+    // Zwei Rechner gleichzeitig: Ein Kollege ändert ein anderes Feld direkt in der Datei, hier wird gleichzeitig das Datum geändert –
+    // beide Änderungen bleiben erhalten, die des Kollegen erscheint auch hier.
+    const lesen = () => page.evaluate(async P => {
+      const p = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('Archiv')).getDirectoryHandle(P);
+      const d = await (await p.getDirectoryHandle('_Spektron')).getDirectoryHandle('BerichtKit');
+      return JSON.parse(await (await (await d.getFileHandle('_BerichtKit.json')).getFile()).text());
+    }, PROJEKT);
+    await page.evaluate(async P => {
+      const p = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('Archiv')).getDirectoryHandle(P);
+      const fh = await (await (await p.getDirectoryHandle('_Spektron')).getDirectoryHandle('BerichtKit')).getFileHandle('_BerichtKit.json');
+      const d = JSON.parse(await (await fh.getFile()).text()); d.form.agSatz = 'die Beispiel Versicherung AG'; d.geaendertVon = 'KOL';
+      const w = await fh.createWritable(); await w.write(JSON.stringify(d, null, 1)); await w.close();
+    }, PROJEKT);
+    await page.fill('#fDatum', '2026-10-28'); await page.dispatchEvent('#fDatum', 'change');
+    let gemischt = null;
+    for (let i = 0; i < 40 && !(gemischt && gemischt.form.datum === '2026-10-28'); i++) { await page.waitForTimeout(150); gemischt = await lesen(); }
+    assert.equal(gemischt.form.datum, '2026-10-28', 'eigene Änderung gespeichert');
+    assert.equal(gemischt.form.agSatz, 'die Beispiel Versicherung AG', 'Änderung des Kollegen bleibt');
+    assert.equal(await page.inputValue('#fAg'), 'die Beispiel Versicherung AG', 'und erscheint auch hier');
     // Spektron-Leiste: BerichtKit ist der eigene Schritt, die anderen Apps sind Links mit demselben Projekt
     await page.waitForSelector('#mosaikLeiste .ml-step.hier');
     assert.match(await page.textContent('#mosaikLeiste .ml-step.hier'), /BerichtKit/);

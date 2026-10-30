@@ -101,6 +101,7 @@ async function waehlen() {
 
 /* ---------- Projekt lesen ---------- */
 async function oeffnen(dir) {
+  await zustandAbschliessen();
   S.laedt = true;
   S.dir = dir; $('kopfProjekt').textContent = dir.name; $('kopfProjekt').title = dir.name;
   $('start').hidden = true; $('app').hidden = false; $('leiste').hidden = false;
@@ -202,7 +203,7 @@ function personFinden(text) {
 const rolle = k => ((S.cfg.personen || {})[k] || {}).rolle === 'mt' ? 'mt' : 'sv';
 async function naechsteMitteilung() {
   const m = await SO.unter(S.dir, ['Mitteilungen']).catch(() => null); let max = 0;
-  if (m) for await (const h of m.values()) { const x = /^(\d+)\.[\s_]*Mitteilung/i.exec(h.name); if (x) max = Math.max(max, +x[1]); }
+  if (m) for await (const h of m.values()) { const x = /^(\d+)[._\s]*Mitteilung(?![a-zäöüß])/i.exec(h.name); if (x) max = Math.max(max, +x[1]); }
   return max + 1;
 }
 async function formStart() {
@@ -216,18 +217,23 @@ async function formStart() {
   const vorgabe = { datum: heute(), mitteilung: await naechsteMitteilung(), variante: 'eigen', eingangsdatum: '', auftragsdatum: P.auftragsdatum,
     agSatz: T.zeilen(P.ag)[0] || '', probenehmer: pn, sv, mt: pn && rolle(pn) === 'mt' ? pn : '', labor: S.cfg.labor || '', einbau: 'unbekannt',
     aus: {}, kmf: {}, who: {}, ki: {}, foto: {} };
-  S.formKey = key; S.zustand = { text: null, geplant: 0, warte: null, berichte: [] };
+  S.formKey = key; S.zustand = { text: null, geplant: 0, pruef: 0, berichte: [], offen: new Set() };
   const geteilt = await zustandLesen().catch(e => { S.quellen.push({ ok: false, text: 'Angaben zum Bericht nicht lesbar: ' + (e && e.message || e) }); return null; });
   if (geteilt) S.quellen.push({ ok: true, text: 'Angaben zum Bericht aus dem Projektordner' + (geteilt.von ? ` (zuletzt ${geteilt.von})` : '') });
   S.form = { ...vorgabe, ...(geteilt ? geteilt.form : gespeichert) };
-  if (!geteilt && Object.keys(gespeichert).length) zustandPlanen();   // frühere Angaben aus diesem Browser einmal in den Projektordner übernehmen
+  if (!geteilt && Object.keys(gespeichert).length) formMerken(...Object.keys(gespeichert));   // frühere Angaben aus diesem Browser einmal in den Projektordner übernehmen
 }
 /* ---------- Angaben zum Bericht – gemeinsam im Projektordner (Bereich „berichtkit“ in spektron-ordner.js) ----------
    { format:'spektron-bericht', version:1, projekt, form:{…}, berichte:[{datei, am, von}], geaendert, geaendertVon, geaendertMit }
-   Frisch lesen → nur schreiben, wenn die Datei seit dem letzten Lesen/Schreiben unverändert ist → zurücklesen.
-   Hat ein Kollege inzwischen gespeichert, gilt sein Stand (wird geladen und gemeldet) – nichts wird stumm überschrieben. */
+   Mehrere Rechner, ein Projektordner – ohne Sperre über Rechner hinweg. Darum:
+   1. Jede eigene Änderung wird als „offen“ vermerkt (Feld, bei Probenangaben Feld + Probe).
+   2. Schreiben: frisch lesen, nur die offenen Felder über den Stand der Datei legen (Änderungen der Kollegen bleiben), schreiben, zurücklesen.
+   3. Kurz danach noch einmal lesen: Steht der eigene Stand noch da, sind die Felder erledigt. Hat ein Kollege in der Zwischenzeit
+      geschrieben und dabei eigene Felder überdeckt, werden sie erneut darübergelegt. So geht keine Änderung verloren;
+      gleichzeitig dasselbe Feld geändert → die zuletzt gespeicherte Eingabe gilt, und es wird gemeldet. */
 const ZUSTAND_DATEI = '_BerichtKit.json';
 const ich = () => { try { return (localStorage.getItem('spektron-ich') || '').trim(); } catch (e) { return ''; } };
+const json = v => JSON.stringify(v === undefined ? null : v);
 function zustandAus(text) {
   const d = JSON.parse(text);
   if (!d || d.format !== 'spektron-bericht' || d.version !== 1 || typeof d.form !== 'object') throw new Error(`${ZUSTAND_DATEI} hat ein unbekanntes Format.`);
@@ -240,29 +246,71 @@ async function zustandLesen() {
   const d = zustandAus(r.text); S.zustand.text = r.text; S.zustand.berichte = Array.isArray(d.berichte) ? d.berichte : [];
   return { form: d.form, von: d.geaendertVon || '' };
 }
-function formMerken() { try { localStorage.setItem(S.formKey, JSON.stringify(S.form)); } catch (e) { /* voll/gesperrt */ } zustandPlanen(); }
+function pfadWert(form, pfad) { const [k, sub] = pfad.split('\u0000'); return sub === undefined ? form[k] : (form[k] || {})[sub]; }
+/** Stand der Datei + eigene offene Felder */
+function mischen(fremd, eigen, offen) {
+  const r = JSON.parse(JSON.stringify(fremd || {}));
+  for (const pfad of offen) {
+    const [k, sub] = pfad.split('\u0000');
+    if (sub === undefined) { if (eigen[k] === undefined) delete r[k]; else r[k] = eigen[k]; continue; }
+    const m = r[k] = { ...(r[k] && typeof r[k] === 'object' ? r[k] : {}) };
+    if (eigen[k] && sub in eigen[k]) m[sub] = eigen[k][sub]; else delete m[sub];
+  }
+  return r;
+}
+const berichteVereinen = (a, b) => [...a, ...b].filter((x, i, l) => x && l.findIndex(y => y && y.datei === x.datei && y.am === x.am) === i).slice(-50);
+/** Eigene Änderung merken (Feldnamen; Probenangaben als [Feld, Probe]) und Speichern planen */
+function formMerken(...pfade) {
+  for (const p of pfade) S.zustand.offen.add(Array.isArray(p) ? p.join('\u0000') : p);
+  formLokal(); zustandPlanen();
+}
 function zustandPlanen() { clearTimeout(S.zustand.geplant); S.zustand.geplant = setTimeout(() => zustandSchreiben().catch(e => fehler('Angaben zum Bericht nicht gespeichert: ' + (e && e.message || e))), 900); }
 async function zustandSchreiben(bericht) {
-  const dir = S.dir; if (!dir) return;
+  const dir = S.dir, z = S.zustand; if (!dir || !z) return;
+  clearTimeout(z.geplant);
   const lauf = async () => {
     const o = await SO.ort(dir, 'berichtkit', { anlegen: true });
     if (!o.dir) throw new Error('Ablageort nicht verfügbar.');
     const jetzt = await leseJson(o.dir, ZUSTAND_DATEI).catch(() => null);
-    if (jetzt && jetzt.text !== S.zustand.text) {   // ein Kollege war schneller: sein Stand gilt
-      const d = zustandAus(jetzt.text); S.zustand.text = jetzt.text; S.zustand.berichte = Array.isArray(d.berichte) ? d.berichte : [];
-      S.form = { ...S.form, ...d.form }; formLokal();
-      $('status').textContent = `Angaben zum Bericht wurden inzwischen ${d.geaendertVon ? 'von ' + d.geaendertVon + ' ' : ''}geändert – dieser Stand ist jetzt geladen.`;
-      render(); if (!bericht) return;
-    }
-    if (bericht) S.zustand.berichte = [...S.zustand.berichte, bericht].slice(-50);
+    const datei = jetzt ? zustandAus(jetzt.text) : null, fremd = !!jetzt && jetzt.text !== z.text;
+    const offen = [...z.offen], form = datei ? mischen(datei.form, S.form, offen) : S.form;
+    const berichte = berichteVereinen(datei && Array.isArray(datei.berichte) ? datei.berichte : [], [...z.berichte, ...(bericht ? [bericht] : [])]);
     const daten = { format: 'spektron-bericht', version: 1, hinweis: 'Angaben von BerichtKit zum Bericht dieses Projekts – nicht von Hand bearbeiten.',
-      projekt: S.ordner.nr || '', form: S.form, berichte: S.zustand.berichte, geaendert: new Date().toISOString(), geaendertVon: ich(), geaendertMit: 'BerichtKit ' + APP_VERSION };
+      projekt: S.ordner.nr || '', form, berichte, geaendert: new Date().toISOString(), geaendertVon: ich(), geaendertMit: 'BerichtKit ' + APP_VERSION };
     const text = JSON.stringify(daten, null, 1);
     const fh = await o.dir.getFileHandle(ZUSTAND_DATEI, { create: true }), w = await fh.createWritable(); await w.write(text); await w.close();
     if (await (await fh.getFile()).text() !== text) throw new Error('Zurücklesen stimmt nicht.');
-    S.zustand.text = text;
+    z.text = text; z.berichte = berichte;
+    const geschrieben = new Map(offen.map(p => [p, json(pfadWert(form, p))]));
+    if (S.zustand === z && fremd && json(form) !== json(S.form)) {   // Änderungen eines Kollegen sind jetzt auch hier
+      S.form = form; formLokal(); render();
+      $('status').textContent = `Angaben von ${datei.geaendertVon || 'einem Kollegen'} übernommen – Ihre Änderungen sind erhalten.`;
+    }
+    clearTimeout(z.pruef); z.pruef = setTimeout(() => zustandPruefen(dir, z, geschrieben).catch(() => {}), 2500);
   };
   return navigator.locks ? navigator.locks.request('berichtkit:projekt:' + dir.name, lauf) : lauf();
+}
+/** Nach dem Schreiben: steht der eigene Stand noch in der Datei? Sonst eigene Felder erneut darüberlegen. */
+async function zustandPruefen(dir, z, geschrieben) {
+  if (S.zustand !== z) return;
+  const o = await SO.ort(dir, 'berichtkit'); if (!o.dir) return;
+  const jetzt = await leseJson(o.dir, ZUSTAND_DATEI).catch(() => null); if (!jetzt) return;
+  const d = zustandAus(jetzt.text), ueberdeckt = [];
+  for (const [p, wert] of geschrieben) {
+    if (json(pfadWert(d.form, p)) === wert) { if (json(pfadWert(S.form, p)) === wert) z.offen.delete(p); }   // steht da und lokal unverändert: erledigt
+    else ueberdeckt.push(p);
+  }
+  if (jetzt.text !== z.text && S.zustand === z) {
+    if (ueberdeckt.length) { $('status').textContent = 'Ein Kollege hat gleichzeitig gespeichert – Ihre Änderungen werden erneut gesichert.'; zustandPlanen(); }
+    else { z.text = jetzt.text; z.berichte = berichteVereinen(Array.isArray(d.berichte) ? d.berichte : [], z.berichte);
+      const form = mischen(d.form, S.form, [...z.offen]); if (json(form) !== json(S.form)) { S.form = form; formLokal(); render(); } }
+  }
+}
+/** Vor dem Projektwechsel: geplantes Speichern sofort ausführen, nichts landet im falschen Projekt. */
+async function zustandAbschliessen() {
+  const z = S.zustand; if (!z || !S.dir) return;
+  clearTimeout(z.pruef);
+  if (z.offen.size || z.geplant) { clearTimeout(z.geplant); z.geplant = 0; await zustandSchreiben().catch(e => fehler('Angaben zum Bericht nicht gespeichert: ' + (e && e.message || e))); clearTimeout(z.pruef); }
 }
 function formLokal() { try { localStorage.setItem(S.formKey, JSON.stringify(S.form)); } catch (e) { /* voll/gesperrt */ } }
 
@@ -467,12 +515,12 @@ async function einstellungenSpeichern() {
     } else localStorage.setItem('berichtkit:cfg', text);
     const laborAlt = S.cfg.labor || '';
     S.cfg = neu; if (!S.form.labor || S.form.labor === laborAlt) S.form.labor = neu.labor;
-    $('dlgEinstellungen').close(); formMerken(); render();
+    $('dlgEinstellungen').close(); formMerken('labor'); render();
   } catch (e) { alert('Einstellungen nicht gespeichert: ' + (e && e.message || e)); }
 }
 
 /* ---------- Eingaben ---------- */
-function setze(k, v) { S.form[k] = v; formMerken(); render(); }
+function setze(k, v) { S.form[k] = v; formMerken(k); render(); }
 function verbinden() {
   $('btnWaehlen').onclick = waehlen; $('btnOrdner').onclick = waehlen;
   $('btnEinstellungen').onclick = einstellungenOeffnen;
@@ -482,9 +530,9 @@ function verbinden() {
   $('fMitteilung').onchange = e => setze('mitteilung', Math.max(1, +e.target.value || 1));
   $('fEingang').onchange = e => setze('eingangsdatum', e.target.value);
   $('fAuftrag').onchange = e => setze('auftragsdatum', e.target.value);
-  $('fAg').oninput = e => { S.form.agSatz = e.target.value; formMerken(); vorschau(modell()); };
+  $('fAg').oninput = e => { S.form.agSatz = e.target.value; formMerken('agSatz'); vorschau(modell()); };
   $('fAg').onchange = () => render();
-  $('fPn').onchange = e => { const k = e.target.value; S.form.probenehmer = k; if (k && rolle(k) === 'mt') S.form.mt = k; else if (S.form.mt && S.form.mt !== k && rolle(S.form.mt) === 'mt') S.form.mt = ''; setze('probenehmer', k); };
+  $('fPn').onchange = e => { const k = e.target.value; S.form.probenehmer = k; if (k && rolle(k) === 'mt') S.form.mt = k; else if (S.form.mt && S.form.mt !== k && rolle(S.form.mt) === 'mt') S.form.mt = ''; S.zustand.offen.add('mt'); setze('probenehmer', k); };
   $('fSv').onchange = e => setze('sv', e.target.value);
   $('fMt').onchange = e => setze('mt', e.target.value);
   $('fLabor').onchange = e => setze('labor', e.target.value.trim());
@@ -496,7 +544,7 @@ function verbinden() {
     if (art === 'aus') { if (el.checked) delete map[l]; else map[l] = false; }
     else if (art === 'kmf' || art === 'who') map[l] = el.checked;
     else map[l] = el.value.trim();
-    formMerken(); render();
+    formMerken([art, l]); render();
   });
   window.addEventListener('hashchange', () => { const n = PROJEKT_URL.lesen(); if (n && (!S.dir || n !== S.dir.name)) start(); });
 }
