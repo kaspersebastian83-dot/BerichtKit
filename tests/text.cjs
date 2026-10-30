@@ -309,7 +309,10 @@ fall('Raum-Kürzel in der Entnahmestelle werden für den Bericht ausgeschrieben 
   assert.ok(m.hinweise.some(h => h.includes('Abkürzungen ausgeschrieben (SZ → Schlafzimmer, WZ → Wohnzimmer, TRH → Treppenhaus)')));
   // nur ganze Wörter, genau so geschrieben; LabelKit-Text bleibt unverändert
   assert.equal(T.raumAusschreiben('SZW, Sz, MSZ, Bad').text, 'SZW, Sz, MSZ, Bad');
-  assert.equal(T.raumAusschreiben('KiZ/AZ').text, 'Kinderzimmer/Arbeitszimmer');
+  assert.equal(T.raumAusschreiben('KiZ/GZ').text, 'Kinderzimmer/Gästezimmer');
+  // AZ = Asbestzement im Asbestbericht – bleibt stehen (Codex-Hinweis PR #8)
+  assert.equal(T.raumAusschreiben('Keller AZ-Rohr').text, 'Keller AZ-Rohr');
+  assert.equal(T.raumAusschreiben('WZ AZ-Platte').text, 'Wohnzimmer AZ-Platte');
   assert.deepEqual(T.raumAusschreiben('').ersetzt, []);
   // ohne Kürzel kein Hinweis
   const m2 = T.bericht({ pj: D.pj(), lk: D.lk([[1, '2026-10-08', 'EG Flur', 'Putz', 'Putze / Spachtelmassen']]), erg: D.erg([[1, 'kein']]), cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form() });

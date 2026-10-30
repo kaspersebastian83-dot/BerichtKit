@@ -143,8 +143,8 @@ const MATRIX_MATERIAL = {
 const matrixMaterial = m => MATRIX_MATERIAL[s(m).normalize('NFC')] || '';
 /* Raum-Kürzel aus LabelKit („SZ“, „WZ“) sind für den Auftraggeber nicht selbsterklärend (Testbericht 26.0512, 30.10.2026).
    Im Bericht (Tabelle 1, Abb.-Unterschriften) werden nur diese eindeutigen Kürzel ausgeschrieben – als ganzes Wort, genau so
-   geschrieben. Geschosse (OG, EG …) bleiben. Jede Ersetzung erscheint als Hinweis; LabelKit, Abgleich und Prüfbericht bleiben unberührt. */
-const RAUM_KUERZEL = { SZ: 'Schlafzimmer', WZ: 'Wohnzimmer', KiZ: 'Kinderzimmer', AZ: 'Arbeitszimmer', GZ: 'Gästezimmer',
+   geschrieben. Geschosse (OG, EG …) bleiben. Nicht dabei: AZ (im Asbestbericht = Asbestzement, „AZ-Rohr“), EZ (mehrdeutig). Jede Ersetzung erscheint als Hinweis; LabelKit, Abgleich und Prüfbericht bleiben unberührt. */
+const RAUM_KUERZEL = { SZ: 'Schlafzimmer', WZ: 'Wohnzimmer', KiZ: 'Kinderzimmer', GZ: 'Gästezimmer',
   HWR: 'Hauswirtschaftsraum', TRH: 'Treppenhaus' };
 const RAUM_RE = new RegExp(`(?<![\\p{L}\\p{N}])(${Object.keys(RAUM_KUERZEL).join('|')})(?![\\p{L}\\p{N}])`, 'gu');
 /** „Bodenaufbau SZ Unterseite“ → { text: „Bodenaufbau Schlafzimmer Unterseite“, ersetzt: ['SZ'] } */
