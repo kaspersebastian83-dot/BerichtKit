@@ -434,6 +434,7 @@ const berichteVereinen = (a, b) => [...a, ...b].filter((x, i, l) => x && l.findI
 /** Eigene Änderung merken (Feldnamen; Probenangaben als [Feld, Probe]): Wert aus dem Formular in die eigenen Angaben, Speichern planen */
 function formMerken(...pfade) {
   const keys = pfade.map(p => Array.isArray(p) ? p.join('\u0000') : p);
+  S.statusFest = null;   // eigene Eingabe: Statuszeile wieder normal
   for (const k of keys) S.zustand.offen.add(k);
   S.eigen = mischen(S.eigen, S.form, keys);
   formLokal(); zustandPlanen();
@@ -580,7 +581,8 @@ function render() {
   $('btnErstellen').disabled = gesperrt;
   $('btnErstellen').title = gesperrt ? 'Gesperrt: ' + m.sperren.join(' · ') : '';
   $('btnLaden').textContent = gesperrt ? 'Entwurf herunterladen' : 'Herunterladen';
-  $('status').textContent = gesperrt ? `Speichern gesperrt (${m.sperren.length}) – siehe Hinweise. „Entwurf herunterladen“ geht.`
+  if (S.statusFest && Date.now() < S.statusFest.bis) $('status').innerHTML = S.statusFest.html;   // eben gemeldet – nicht gleich überschreiben
+  else (S.statusFest = null, $('status')).textContent = gesperrt ? `Speichern gesperrt (${m.sperren.length}) – siehe Hinweise. „Entwurf herunterladen“ geht.`
     : `Speichert als Mitteilungen/${m.dateiname}` + (m.luecken.length ? ` · ${m.luecken.length} Lücke(n) gelb markiert` : '');
 }
 const tagDE = t => { if (!t) return ''; const d = new Date(t); return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`; };
@@ -684,9 +686,11 @@ async function vorherNeuLesen(anlass) {
   const ungesehen = S.ungesehen && Date.now() - S.ungesehen < UNGESEHEN_MS;
   S.ungesehen = 0;
   if (!geaendert.length && !ungesehen) return false;
-  $('status').innerHTML = '<span class="warn">Die Daten haben sich inzwischen geändert – schau dir die Vorschau an und klick dann noch einmal.</span>';
+  statusFest('<span class="warn">Die Daten haben sich inzwischen geändert – schau dir die Vorschau an und klick dann noch einmal.</span>');
   return true;
 }
+/** Statuszeile, die ein Neuzeichnen kurz übersteht (bis zur nächsten eigenen Eingabe, höchstens 8 s) */
+function statusFest(html) { S.statusFest = { html, bis: Date.now() + 8000 }; $('status').innerHTML = html; }
 const dateiDa = async (dir, name) => { try { await dir.getFileHandle(name); return true; } catch (e) { return false; } };
 async function freierName(dir, name) { for (let i = 2; ; i++) { const n = name.replace(/\.docx$/i, ` (${i}).docx`); if (!(await dateiDa(dir, n))) return n; } }
 async function speichern() {
@@ -704,7 +708,7 @@ async function speichern() {
       // Datei gibt es schon: Ersetzen / daneben / abbrechen – ist sie schon beim Büro, wird nicht ersetzt
       const buero = await beimBuero(name).catch(() => ({ unklar: true })), naechste = await naechsteMitteilung();
       const wahl = await ersetzenFragen(name, buero, naechste);
-      if (wahl === 'abbrechen') { $('status').textContent = `Nicht gespeichert – „${name}“ ist unverändert.`; return; }
+      if (wahl === 'abbrechen') { statusFest(esc(`Nicht gespeichert – „${name}“ ist unverändert.`)); return; }
       if (wahl === 'daneben') name = await freierName(ziel, name);
       if (wahl === 'naechste') {   // Nummer erst nach allen Rückfragen übernehmen – bei Abbruch bleibt das Formular, wie es war
         neueNr = naechste; m0 = modell({ mitteilung: naechste });
@@ -714,7 +718,7 @@ async function speichern() {
     }
     if (m0.luecken.length && !confirm(`Im Bericht sind noch ${m0.luecken.length} Lücke(n) gelb markiert:\n${m0.luecken.join(', ')}\n\nTrotzdem speichern?`)) { render(); return; }
     if (neueNr) { S.form.mitteilung = neueNr; S.form.mitteilungAm = new Date().toISOString(); formMerken('mitteilung', 'mitteilungAm'); render(); }
-    $('status').textContent = 'Word-Datei wird erstellt …';
+    S.statusFest = null; $('status').textContent = 'Word-Datei wird erstellt …';
     const { blob, m, fehlen } = await wordBlob(m0);
     const fh = await ziel.getFileHandle(name, { create: true });
     let w; try { w = await fh.createWritable(); } catch (e) { throw new Error(`„${name}“ lässt sich nicht schreiben – ist die Datei noch in Word geöffnet?`); }
@@ -728,7 +732,7 @@ async function speichern() {
       anlagen: m.anlagenDateien, anlagenListe: m.anlagenListe, luecken: m.luecken.length })
       .catch(e => fehler('Bericht gespeichert, Angaben dazu nicht: ' + (e && e.message || e)));
     if (window.MosaikLeiste) MosaikLeiste.aktualisieren();
-    $('status').innerHTML = `<span class="ok">✓ Gespeichert: Mitteilungen/${esc(name)}</span>` + (fehlen.length ? ` · Foto(s) nicht lesbar: ${esc(fehlen.join(', '))}` : '');
+    statusFest(`<span class="ok">✓ Gespeichert: Mitteilungen/${esc(name)}</span>` + (fehlen.length ? ` · Foto(s) nicht lesbar: ${esc(fehlen.join(', '))}` : ''));
     uebergabeZeigen(name);
   } catch (e) {
     $('status').textContent = ''; fehler('Speichern fehlgeschlagen: ' + (e && e.message || e));
