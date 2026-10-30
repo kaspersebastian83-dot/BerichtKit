@@ -66,8 +66,13 @@ function erstellen(D, m, bilder) {
 
   /* Abschnitte */
   const NONE = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, duenn = { style: BorderStyle.SINGLE, size: 4, color: '808080' };
-  const ueberschrift = text => new Paragraph({ children: [t(text, { underline: { type: UnderlineType.SINGLE } })], spacing: { ...LINE15, before: 240, after: 240 }, keepNext: true, outlineLevel: 0 });
-  const absatz = r => new Paragraph({ children: runs(r), alignment: AlignmentType.JUSTIFIED, spacing: { ...LINE15, after: 240 } });
+  /* Abstände: 1 Leerzeile = 12 pt. Über jeder Überschrift 2 Leerzeilen (24 pt), darunter 1; die erste Überschrift
+     („1. Veranlassung“) beginnt ohne Abstand. Der Abstand steht nur an der Überschrift – der Absatz davor bekommt 0,
+     damit Word und LibreOffice gleich aussehen (sie verrechnen „nach“ + „vor“ unterschiedlich). */
+  const LEER = 240;
+  const ueberschrift = (text, erste) => new Paragraph({ children: [t(text, { underline: { type: UnderlineType.SINGLE } })],
+    spacing: { ...LINE15, before: erste ? 0 : 2 * LEER, after: LEER }, keepNext: true, outlineLevel: 0 });
+  const absatz = (r, nach = LEER) => new Paragraph({ children: runs(r), alignment: AlignmentType.JUSTIFIED, spacing: { ...LINE15, after: nach } });
   const SPALTEN = [950, 2080, 2240, 1850, 1950];     // Labor-Nr. breit genug für „777-2026-00445679“ in einer Zeile
   /* Labor-Nr.: geschützte Bindestriche, damit Word die Nummer nicht am Bindestrich umbricht */
   const ohneUmbruch = (text, o) => [new TextRun({ font: FONT, ...o, children: String(text).split('-').flatMap((x, i) => (i ? [new NoBreakHyphen(), x] : [x])).filter(x => x !== '') })];
@@ -79,10 +84,11 @@ function erstellen(D, m, bilder) {
       : runs(inhalt === '' || inhalt == null ? '–' : inhalt, { size: 20, bold: !!kopf }) })],
   });
   const kinder = [];
-  for (const a of m.abschnitte) {
-    kinder.push(ueberschrift(a.titel));
-    for (const x of a.inhalt) {
-      if (x.t === 'p') kinder.push(absatz(x.runs));
+  m.abschnitte.forEach((a, ai) => {
+    kinder.push(ueberschrift(a.titel, ai === 0));
+    a.inhalt.forEach((x, xi) => {
+      const nach = xi === a.inhalt.length - 1 && ai < m.abschnitte.length - 1 ? 0 : LEER;   // vor der nächsten Überschrift
+      if (x.t === 'p') kinder.push(absatz(x.runs, nach));
       else if (x.t === 'fig') {
         const b = bilder.fotos && bilder.fotos[x.label];
         if (b) {
@@ -90,16 +96,16 @@ function erstellen(D, m, bilder) {
           kinder.push(new Paragraph({ children: [new ImageRun({ type: 'jpg', data: b.data, transformation: { width: cmPx(w), height: cmPx(h) },
             altText: { title: x.caption, description: x.caption, name: x.label } })], alignment: AlignmentType.CENTER, keepNext: true, spacing: { before: 120, after: 60 } }));
         } else kinder.push(new Paragraph({ children: [t(`[Foto fehlt: ${x.datei}]`, { highlight: 'yellow' })], alignment: AlignmentType.CENTER, keepNext: true }));
-        kinder.push(new Paragraph({ children: [t(x.caption, { italics: true, size: 22 })], alignment: AlignmentType.CENTER, spacing: { ...LINE15, after: 240 } }));
+        kinder.push(new Paragraph({ children: [t(x.caption, { italics: true, size: 22 })], alignment: AlignmentType.CENTER, spacing: { ...LINE15, after: nach } }));
       } else if (x.t === 'tab') {
         kinder.push(new Paragraph({ children: [t(x.caption, { italics: true, size: 22 })], keepNext: true, spacing: { ...LINE1, after: 120 } }));
         kinder.push(new Table({ width: { size: B, type: WidthType.DXA }, columnWidths: SPALTEN,
           rows: [new TableRow({ tableHeader: true, children: x.kopf.map((k, i) => zelle(k, SPALTEN[i], true)) }),
             ...x.zeilen.map(z => new TableRow({ cantSplit: true, children: z.map((c, i) => zelle(c, SPALTEN[i], false, i === 1)) }))] }));
-        kinder.push(new Paragraph({ children: [], spacing: { ...LINE1, after: 240 } }));
+        kinder.push(new Paragraph({ children: [], spacing: { ...LINE1, after: nach } }));
       }
-    }
-  }
+    });
+  });
 
   /* Ort/Datum, Unterschriften, Anlagen */
   kinder.push(new Paragraph({ children: [t(m.ortDatum)], spacing: { ...LINE15, before: 240, after: 480 }, keepNext: true }));
