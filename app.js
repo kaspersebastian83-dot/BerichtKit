@@ -6,7 +6,7 @@
 const APP_VERSION = '1.6.1';
 const APP_DATE = '30.10.2026';
 const CHANGELOG = [
-  ['1.6.1', '30.10.2026', 'Entnahmestelle: Raum-Kürzel aus LabelKit (SZ, WZ, KiZ, AZ, GZ, HWR, TRH) werden in Tabelle 1 und in den Bildunterschriften ausgeschrieben, z. B. „Bodenaufbau SZ“ → „Bodenaufbau Schlafzimmer“. Nur ganze Wörter in genau dieser Schreibweise; Geschosse (OG, EG …) bleiben. Ein Hinweis nennt jede Ersetzung. LabelKit, der Abgleich mit dem Prüfbericht und die Laborübergabe bleiben unverändert.'],
+  ['1.6.1', '30.10.2026', 'Entnahmestelle: Raum-Kürzel aus LabelKit (SZ, WZ, KiZ, AZ, GZ, HWR, TRH) werden in Tabelle 1 und in den Bildunterschriften ausgeschrieben, z. B. „Bodenaufbau SZ“ → „Bodenaufbau Schlafzimmer“. Nur ganze Wörter in genau dieser Schreibweise; Geschosse (OG, EG …) bleiben. Ein Hinweis nennt jede Ersetzung. LabelKit, der Abgleich mit dem Prüfbericht und die Laborübergabe bleiben unverändert. Unterschriften: Die PNG in „_Spektron-Unterschriften“ wird jetzt auch gefunden, wenn das Kürzel anders geschrieben ist (Leerzeichen, Punkte, Groß/klein – „Dr. Ka.png“ passt zu „Dr.Ka“).'],
   ['1.6.0', '30.10.2026', 'Anlagen: BerichtKit sucht im Projektordner, was als Anlage beiliegt, und nummeriert in der festen Hausreihenfolge – Anlage 1 Prüfbericht(e), dann Bilddokumentation (FotoKit, „Fotos“), dann Probenplan (PlanKit, „Pläne“). Gefunden und aktuell = angehakt; veraltet (nach dem Erstellen in FotoKit/PlanKit geändert) = Hinweis und nicht angehakt; fehlt = graue Zeile mit Link in die App. Eine Anlage aus mehreren Dateien (Bilddoku in Teilen, Plan je Geschoss) ist eine Anlage. Ergebniskarte, Raumbuch, Wandansichten und die Word-Anlage „Probenahme“ aus PlanKit werden angeboten, aber nur angehakt mitgenommen. „+ Weitere Datei …“ für eigene Anlagen. In „2. Probenahme und Untersuchung“ ein Satz mit Verweis auf Bilddokumentation und Probenplan; Hinweis, wenn die Bilddoku eine andere Anlagen-Nr. trägt. Alle Anlagen-Dateien gehen in die Übergabe ans Büro.'],
   ['1.5.0', '30.10.2026', 'Frau/Herr im Text ohne Einstellungen: Frau Dr. Pütt und Frau Jung, alle anderen aus dem Büro Herr (Einstellung geht vor; in der Unterschrift weiterhin ohne Anrede). Tabelle 1: Spalte „Probe“ nur mit der Nummer, Nummer und Labor-Nr. zentriert (samt Spaltenkopf), Textspalten linksbündig. Material: ist „Bauteil / Material“ in LabelKit leer, kommt es aus der Matrix (z. B. „Putz / Spachtelmasse“) – mit Hinweis.'],
   ['1.4.1', '30.10.2026', 'Projektprüfung vergleicht nur noch die Projektnummer: Steht im LabelKit-Feld „Projektnummer“ zusätzlich die Adresse (ältere Projekte, z. B. „26.0512 Stegerwaldstraße Leverkusen“), wird das Speichern nicht mehr fälschlich gesperrt. Eine andere Nummer sperrt weiter.'],
@@ -18,6 +18,8 @@ const CHANGELOG = [
 ];
 const SO = globalThis.SpektronOrdner, T = globalThis.BerichtText;
 const CFG_DATEI = '_Spektron-BerichtKit.json', MA_DATEI = '_Spektron-Mitarbeiter.json', SIG_ORDNER = '_Spektron-Unterschriften';
+/** Unterschrift-Datei ↔ Kürzel ohne Groß-/Kleinschreibung, Leerzeichen und Punkte (wie SPEKTRON-ORDNERNAME): „Dr. Ka.png“ = „Dr.Ka“ = „DrKa“ */
+const sigKey = k => String(k == null ? '' : k).normalize('NFC').toLowerCase().replace(/[\s.]/g, '');
 const $ = id => document.getElementById(id);
 const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -185,7 +187,7 @@ async function archivLesen() {
       if (h.kind !== 'file' || !/\.png$/i.test(h.name)) continue;
       try {
         const f = await h.getFile(), data = new Uint8Array(await f.arrayBuffer()), bmp = await createImageBitmap(f);
-        S.sig[h.name.replace(/\.png$/i, '').toLowerCase()] = { data, w: bmp.width, h: bmp.height, url: URL.createObjectURL(f) }; bmp.close();
+        S.sig[sigKey(h.name.replace(/\.png$/i, ''))] = { data, w: bmp.width, h: bmp.height, url: URL.createObjectURL(f) }; bmp.close();
       } catch (e) { /* unlesbares Bild: ohne Unterschrift */ }
     }
   } else {
@@ -527,7 +529,7 @@ function vorschau(m) {
     }
   }
   teile.push(`<p style="margin-top:20px">${esc(m.ortDatum)}</p><div class="sig">${m.unterschriften.map(u => {
-    const b = u.kuerzel && S.sig[u.kuerzel.toLowerCase()];
+    const b = u.kuerzel && S.sig[sigKey(u.kuerzel)];
     return `<div><div class="linie">${b ? `<img src="${b.url}" alt="">` : ''}</div>${runsHtml(u.rolle)}<br>${runsHtml(u.name)}</div>`; }).join('')}</div>`);
   teile.push(`<div style="margin-top:28px;display:grid;grid-template-columns:auto 1fr;column-gap:.7em;row-gap:.5em;text-align:left">${(m.anlagenTeile || [])
     .map(a => `<div>${esc(a.label)}</div><div>${a.zeilen.map(runsHtml).join('<br>')}</div>`).join('')}</div>`);
@@ -570,7 +572,7 @@ async function logoLaden() {
 async function wordBlob(m) {
   if (!m.proben.length) throw new Error('Keine Proben im Bericht.');
   const bilder = { ...(await logoLaden()), sig: {}, fotos: {} };
-  for (const u of m.unterschriften) { const b = u.kuerzel && S.sig[u.kuerzel.toLowerCase()]; if (b) bilder.sig[u.kuerzel] = b; }
+  for (const u of m.unterschriften) { const b = u.kuerzel && S.sig[sigKey(u.kuerzel)]; if (b) bilder.sig[u.kuerzel] = b; }
   const fehlen = [];
   for (const p of m.proben) if (p.foto) { try { bilder.fotos[p.label] = await fotoBytes(p.foto); } catch (e) { fehlen.push(p.foto); } }
   const blob = await docx.Packer.toBlob(BerichtDocx.erstellen(docx, m, bilder));
@@ -635,7 +637,7 @@ function einstellungenOeffnen() {
       <td><select data-f="geschlecht"><option value="">${({ w: 'Frau (Standard)', m: 'Herr (Standard)' })[T.anredeStandard(p.name || ma.name || '')] || '–'}</option><option value="w" ${p.geschlecht === 'w' ? 'selected' : ''}>Frau</option><option value="m" ${p.geschlecht === 'm' ? 'selected' : ''}>Herr</option></select></td>
       <td><select data-f="rolle"><option value="sv">Sachverständige(r)</option><option value="mt" ${p.rolle === 'mt' ? 'selected' : ''}>Messtechniker(in)</option></select></td>
       <td><input type="text" data-f="satz" value="${esc(p.satz || '')}" placeholder="${esc(vorschlag ? vorschlag.satz : '')}" title="„… wurde durch ___ entnommen“ – leer = Vorschlag"></td>
-      <td>${S.sig[k.toLowerCase()] ? '<span class="ok">✓ vorhanden</span>' : `<span class="klein">fehlt (${esc(k)}.png)</span>`}</td></tr>`;
+      <td>${S.sig[sigKey(k)] ? '<span class="ok">✓ vorhanden</span>' : `<span class="klein">fehlt (${esc(k)}.png)</span>`}</td></tr>`;
   }).join('') : '<tr><td colspan="6" class="klein">Keine Namensliste – in der Projektzentrale unter Mitarbeiter anlegen.</td></tr>';
   $('eHinweis').textContent = S.cfgOrt === 'lokal' ? 'Archivordner nicht verbunden – Einstellungen werden nur in diesem Browser gespeichert. Öffnen Sie BerichtKit aus der Projektzentrale, damit sie für alle gelten.' : '';
   $('dlgEinstellungen').showModal();
