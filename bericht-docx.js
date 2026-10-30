@@ -42,19 +42,26 @@ function erstellen(D, m, bilder) {
     adr(''), adr('Sachverständige'), adr('für Schimmelpilzschäden in Innenräumen'),
   ] });
 
+  /* Kennzeilen „ENTWURF – nicht versenden“ (rot) / „Vorläufig …“: auf dem Deckblatt über dem Titel, auf den Folgeseiten
+     in der zweiten Leerzeile des Kopfes – die Seitenaufteilung bleibt gleich. */
+  const kennRuns = (o = {}) => (m.kennzeilen || []).flatMap((k, i) => [...(i ? [t('  ·  ', o)] : []),
+    t(k.text, { bold: true, ...(k.art === 'entwurf' ? { color: 'C00000' } : {}), ...o })]);
+
   /* Kopf Folgeseiten */
   const k9 = r => einfach(runs(r, { size: 18 }));
   const kopfFolge = new Header({ children: [
     new Paragraph({ children: [logo(3.97, -0.26, -0.44), t('\t'), new TextRun({ font: FONT, children: ['Seite ', PageNumber.CURRENT, ' von ', PageNumber.TOTAL_PAGES] })],
       tabStops: [{ type: TabStopType.RIGHT, position: B }], spacing: { ...LINE1, after: 0 } }),
-    einfach([t('')]), einfach([t('')]),
+    einfach([t('')]), einfach((m.kennzeilen || []).length ? kennRuns({ size: 18 }) : [t('')]),
     ...m.kopf.map(k9),
   ] });
 
   /* Deckblatt */
   const TAB = 3960, d = m.deckblatt;
+  const kenn = (m.kennzeilen || []).length;
   const deckblatt = [
-    new Paragraph({ children: [t(d.titel, { bold: true, italics: true, size: 28 })], spacing: { ...LINE15, before: 2760, after: 0 } }),
+    ...(kenn ? [einfach(kennRuns(), { spacing: { ...LINE1, before: 2760 - 480, after: 240 } })] : []),
+    new Paragraph({ children: [t(d.titel, { bold: true, italics: true, size: 28 })], spacing: { ...LINE15, before: kenn ? 0 : 2760, after: 0 } }),
     new Paragraph({ children: [t(`(${d.mitteilung})`, { bold: true, italics: true })], spacing: { ...LINE15, after: 600 } }),
     einfach([t('Projektnummer:'), t('\t'), ...runs(d.projektnummer || { gap: '[Projektnummer]' })], { tabStops: [{ type: TabStopType.LEFT, position: TAB }], spacing: { ...LINE1, after: 360 } }),
     einfach(runs(d.betreff), { spacing: { ...LINE1, after: 720 } }),

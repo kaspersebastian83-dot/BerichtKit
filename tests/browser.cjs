@@ -135,6 +135,11 @@ const daten = {
     assert.equal(zustand.format, 'spektron-bericht'); assert.equal(zustand.projekt, '99.9001');
     assert.equal(zustand.form.probenehmer, 'Mes'); assert.equal(zustand.form.einbau, 'vor1996');
     assert.deepEqual(zustand.berichte.map(b => b.datei), ['1._Mitteilung_99.9001.docx']);
+    assert.deepEqual(zustand.berichte[0].anlagen, ['Laborergebnisse/AR-999-2026-000001-01.pdf']); assert.equal(zustand.berichte[0].luecken, 0);
+    // Danach: „Ans Büro übergeben →“ öffnet die Projektzentrale mit vorbelegter Word-Datei
+    assert.equal(await page.getAttribute('#btnUebergabe', 'href'),
+      '../Projektzentrale/#projekt=' + encodeURIComponent(PROJEKT) + '&uebergabe=' + encodeURIComponent('Mitteilungen/1._Mitteilung_99.9001.docx'));
+    assert.ok(await page.isVisible('#btnUebergabe'));
     // Zwei Rechner gleichzeitig: Ein Kollege ändert ein anderes Feld direkt in der Datei, hier wird gleichzeitig das Datum geändert –
     // beide Änderungen bleiben erhalten, die des Kollegen erscheint auch hier.
     const lesen = () => page.evaluate(async P => {

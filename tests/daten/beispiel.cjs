@@ -16,12 +16,17 @@ const werte = {
   kmf: [{ p: 'Asbestart', r: 'Kein Asbest nachgewiesen', u: '', nwg: '1 %' }, { p: 'WHO-Fasern', r: 'nachgewiesen', u: '' }, { p: 'Kanzerogenitätsindex KI', r: '26', u: '' }],
 };
 const erg = (proben, bericht = 'AR-999-2026-000001-01') => ({ format: 'spektron-ergebnisse', version: 1, projekt: '99.9001',
-  berichte: [{ id: 'b1', bericht, labor: 'Eurofins', auftragsreferenz: '99.9001 Musterstadt', datum: '2026-10-20', sources: {},
+  berichte: [{ id: 'b1', bericht, labor: 'Eurofins', auftragsreferenz: '99.9001 Musterstadt', datum: '2026-10-20', sources: { xml: bericht + '.xml', pdf: bericht + '.pdf' },
     proben: proben.map(([nr, w]) => ({ label: 'P' + nr, ref: 'Probe ' + nr, labNr: '999-2026-0000' + (100 + nr), typ: 'Asbest', reportId: 'b1', werte: werte[w] })) }],
   ersetzt: [], offen: [], hinweise: [] });
+/** LabelKit-Auftrag, wie ResultKit ihn in _Ergebnisse.json ablegt: [[nr, desc]] (desc = Text der Laborübergabe) */
+const auftrag = (e, proben, quelle = '99.9001_16.10.2026_Daten.json') => ({ ...e, auftrag: { quelle,
+  proben: proben.map(([nr, desc]) => ({ label: 'P' + nr, typ: 'Asbest', ref: 'Probe ' + nr, desc })) } });
+/** Beschreibung im Prüfbericht setzen: { P1: 'Text' } */
+const berichtDesc = (e, map) => { for (const b of e.berichte) for (const p of b.proben) if (p.label in map) p.desc = map[p.label]; return e; };
 const mitarbeiter = [{ ordnerKuerzel: 'Tst', appKuerzel: 'TST', name: 'Dr. Tanja Test', aktiv: true },
   { ordnerKuerzel: 'Mes', appKuerzel: 'MES', name: 'Max Messer', aktiv: true },
   { ordnerKuerzel: 'Vom', appKuerzel: 'VOM', name: 'Paul vom Beispiel', aktiv: true }];
 const cfg = { format: 'spektron-berichtkit', version: 1, labor: 'Eurofins Beispiel-Labor GmbH',
   personen: { Tst: { rolle: 'sv', geschlecht: 'w' }, Mes: { rolle: 'mt', geschlecht: 'm' }, Vom: { rolle: 'sv', geschlecht: 'm' } } };
-module.exports = { pj, lk, erg, werte, mitarbeiter, cfg };
+module.exports = { pj, lk, erg, auftrag, berichtDesc, werte, mitarbeiter, cfg };

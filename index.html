@@ -24,6 +24,8 @@ button{cursor:pointer;border:1px solid var(--line2);background:var(--panel);bord
 button:hover{border-color:var(--accent-l);color:var(--accent)}
 button.primary{background:var(--accent);border-color:var(--accent-2);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(26,74,122,.22)}
 button.primary:hover{background:var(--accent-l);color:#fff}
+.leiste a.knopf{border:1px solid var(--ok);background:var(--ok);color:#fff;border-radius:7px;padding:6px 13px;font-weight:600;text-decoration:none}
+.leiste a.knopf[hidden]{display:none}
 button:disabled{opacity:.45;cursor:not-allowed}
 input[type=text],input[type=date],input[type=number],select{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:5px 9px;width:100%}
 input:focus,select:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
@@ -57,6 +59,10 @@ table.proben tr.aus td{opacity:.45}
 .unter input[type=text]{width:70px;padding:1px 6px}
 .unter select{width:auto;max-width:210px;padding:1px 6px;font-size:12px}
 ul.hinweise{margin:0;padding-left:18px;font-size:13px}
+ul.hinweise li.sperre{color:var(--err);font-weight:600}
+.feld .quelle .annahme{background:var(--gap);border-radius:4px;padding:0 4px;color:var(--ink,#222)}
+.klein-knopf{font-size:11px;padding:0 6px;margin-left:4px}
+.blatt .kenn{font-weight:700;font-size:12.5px;margin:0 0 10px}.blatt .kenn .entwurf{color:#c00000}
 ul.hinweise li.luecke{background:var(--gap);border-radius:4px;padding:0 4px;list-style-position:inside;margin-left:-18px}
 .ok{color:var(--ok)}
 .fehler{background:#fdf1ef;border:1px solid #f1c4bd;color:var(--err);border-radius:8px;padding:10px 14px;margin-bottom:14px}
@@ -150,7 +156,7 @@ dialog .knoepfe{display:flex;justify-content:flex-end;gap:8px;padding:12px 22px;
     </div>
     <div class="karte">
       <h2>Personen</h2>
-      <div class="feld" id="zeilePn"><label for="fPn">Probenahme durch</label><select id="fPn"></select></div>
+      <div class="feld" id="zeilePn"><label for="fPn">Probenahme durch</label><select id="fPn"></select><span class="quelle"><span id="qPn"></span> <button type="button" class="klein-knopf" id="btnPnOk" hidden title="Auswahl stimmt – Hinweis ausblenden">✓ stimmt</button></span></div>
       <div class="feld"><label for="fSv">Sachverständige(r)</label><select id="fSv"></select></div>
       <div class="feld" id="zeileMt"><label for="fMt">Zweite Unterschrift</label><select id="fMt"></select><span class="quelle">Messtechniker unterschreibt mit, wenn er die Proben genommen hat</span></div>
       <div class="feld"><label for="fLabor">Labor</label><input type="text" id="fLabor" list="laborListe"><datalist id="laborListe"><option value="Eurofins Boden und Grundwasser Südwest GmbH"><option value="Eurofins Umwelt West GmbH"></datalist></div>
@@ -167,6 +173,7 @@ dialog .knoepfe{display:flex;justify-content:flex-end;gap:8px;padding:12px 22px;
   <span class="status" id="status"></span>
   <button id="btnLaden" title="Word-Datei herunterladen statt im Projektordner zu speichern">Herunterladen</button>
   <button class="primary" id="btnErstellen">Word-Bericht in „Mitteilungen“ speichern</button>
+  <a class="knopf" id="btnUebergabe" hidden title="Projektzentrale öffnen – Word-Datei und Prüfberichte sind für die Übergabe vorbelegt">Ans Büro übergeben →</a>
 </div>
 
 <dialog id="dlgEinstellungen">
