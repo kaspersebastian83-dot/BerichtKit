@@ -35,6 +35,8 @@ const PROFILE = Object.freeze({
 const TEIL = /[_ -]+Teil[_ ](\d+)[_ ]von[_ ](\d+)(?=\.pdf$)/i;
 const KOPIE = / \((\d+)\)(?=\.[a-z]+$)/i;
 const zeit = v => { const t = Date.parse(s(v)); return Number.isFinite(t) ? t : null; };
+/** Schlüssel für die eigene Wahl: Dateien + Stand – eine neu erzeugte Fassung unter gleichem Namen gilt als neue Anlage */
+const schluessel = (dateien, t) => dateien.join('|') + '@' + (+t || 0);
 const anlageNr = v => { const m = /(\d+)/.exec(s(v)); return m ? +m[1] : null; };
 
 /** Bilddokumentation aus FotoKit: Fotos/Bilddokumentation_<Nr>_<Ort>_<Datum>[ (k)][_Teil_i_von_n].pdf (ältere: „… - Teil 1 von 2.pdf“);
@@ -59,7 +61,7 @@ function bilddokuFinden(fotos, fk) {
     g = gruppen.get(vermerkt[0].replace(TEIL, '').toLowerCase()) || null; aufgezeichnet = !!g;
   }
   if (!g) g = [...gruppen.values()].sort((a, b) => b.t - a.t)[0];
-  const dateien = dateienVon(g), k = { art: 'bilddoku', dateien, t: g.t, key: dateien.join('|'), veraltet: null, grund: '', unvollstaendig: false, nrImDokument: null, nrQuelle: '', details: g.n > 1 ? `${g.n} Teile` : '' };
+  const dateien = dateienVon(g), k = { art: 'bilddoku', dateien, t: g.t, key: schluessel(dateien, g.t), veraltet: null, grund: '', unvollstaendig: false, nrImDokument: null, nrQuelle: '', details: g.n > 1 ? `${g.n} Teile` : '' };
   if (!vollstaendig(g)) { k.unvollstaendig = true; k.grund = `Teil fehlt – gefunden ${g.teile.size} von ${g.n}`; }
   // Stand: FotoKit (ab 1.29) vermerkt die erzeugte PDF (bilddoku.erstellt) und wann sich die Inhalte der Doku zuletzt geändert haben (dokuGeaendert)
   const geaendert = zeit(fk && fk.dokuGeaendert);
@@ -74,13 +76,15 @@ function bilddokuFinden(fotos, fk) {
   return k;
 }
 
-/** Plan-PDFs aus PlanKit: Pläne/Probenplan <Ordner>[ - <Geschoss>][ - Ergebniskarte][ (k)].pdf – „alle Geschosse“ ohne Geschoss-Zusatz */
+/** Plan-PDFs aus PlanKit: Pläne/Probenplan <Ordner>[ - <Geschoss>][ - Ergebniskarte][ (k)].pdf – „alle Geschosse“ ohne Geschoss-Zusatz.
+    Nur Dateien mit dem Namen dieses Projektordners: ein hineinkopierter Plan eines anderen Projekts wird nie Anlage. */
 function planFinden(art, plaene, plan, ordnerName) {
   const ergebnis = art === 'ergebniskarte', praefix = ('Probenplan ' + nfc(ordnerName)).toLowerCase();
   const neueste = new Map();   // Name ohne „ (k)“ → neueste Datei
   for (const f of plaene || []) {
     const name = nfc(f.name); if (!/^Probenplan\b.*\.pdf$/i.test(name)) continue;
     const ohne = name.replace(KOPIE, ''), istErg = / - Ergebniskarte\.pdf$/i.test(ohne);
+    if (s(ordnerName) && !ohne.toLowerCase().startsWith(praefix)) continue;   // Plan eines anderen Projekts (kopiert) – nie als Anlage
     if (istErg !== ergebnis) continue;
     const key = ohne.toLowerCase(), alt = neueste.get(key);
     if (!alt || (+f.t || 0) > alt.t) neueste.set(key, { name, ohne, t: +f.t || 0 });
@@ -97,7 +101,7 @@ function planFinden(art, plaene, plan, ordnerName) {
   const je = alle.filter(x => x.geschoss).sort((a, b) => a.geschoss.localeCompare(b.geschoss, 'de', { numeric: true }));
   const nimm = gesamt && (!je.length || gesamt.t >= Math.max(...je.map(x => x.t))) ? [gesamt] : je;
   const t = Math.max(...nimm.map(x => x.t)), dateien = nimm.map(x => 'Pläne/' + x.name);
-  const k = { art, dateien, t, key: dateien.join('|'), veraltet: null, grund: '', unvollstaendig: false, nrImDokument: null, nrQuelle: '',
+  const k = { art, dateien, t, key: schluessel(dateien, Math.max(...nimm.map(x => x.t))), veraltet: null, grund: '', unvollstaendig: false, nrImDokument: null, nrQuelle: '',
     details: nimm.length > 1 || nimm[0].geschoss ? nimm.map(x => x.geschoss).join(', ') : '' };
   if (plan && plan.t) { k.veraltet = plan.t > Math.min(...nimm.map(x => x.t)) + TOLERANZ; if (k.veraltet) k.grund = 'Plan in PlanKit nach dem Export geändert'; }
   else k.grund = 'PlanKit-Datei (.probenplan) nicht gefunden – Stand nicht prüfbar';
@@ -119,7 +123,7 @@ function wordFinden(art, mitteilungen, protokoll, plan) {
   const kand = (mitteilungen || []).filter(f => WORD[art].test(nfc(f.name))).sort((a, b) => (+b.t || 0) - (+a.t || 0) || nfc(b.name).localeCompare(nfc(a.name), 'de', { numeric: true }));
   if (!kand.length) return null;
   const f = kand[0], name = nfc(f.name), dateien = ['Mitteilungen/' + name];
-  const k = { art, dateien, t: +f.t || 0, key: dateien.join('|'), veraltet: null, grund: '', unvollstaendig: false, nrImDokument: null, nrQuelle: '', details: '' };
+  const k = { art, dateien, t: +f.t || 0, key: schluessel(dateien, f.t), veraltet: null, grund: '', unvollstaendig: false, nrImDokument: null, nrQuelle: '', details: '' };
   const z = protokollLesen(protokoll).filter(x => x.datei.toLowerCase() === name.toLowerCase()).pop();
   if (z && /^[0-9a-f]{64}$/i.test(z.quellSha) && plan && plan.sha) {   // genau: Prüfsumme der Quelle beim Erstellen ↔ jetzt
     k.veraltet = z.quellSha.toLowerCase() !== plan.sha.toLowerCase(); if (k.veraltet) k.grund = 'Plan in PlanKit nach dem Erstellen geändert';
@@ -140,7 +144,7 @@ function erkennen(e) {
 
 /* ---------- Zusammenstellen und nummerieren ----------
    pruefberichte: [{ nr, pdf }] (pdf: Pfad oder ''), labor, gefunden: erkennen(), wahl: form.anlagen { <art>: { an, key } }
-   (eigene Wahl gilt nur, solange dieselben Dateien gefunden werden), extra: form.anlagenExtra [{ pfad, bezeichnung, fehlt }],
+   (eigene Wahl gilt nur, solange dieselben Dateien im selben Stand gefunden werden), extra: form.anlagenExtra [{ pfad, bezeichnung, fehlt }],
    ohneEigeneProbenahme: zugestellte Probe – fehlende feste Anlagen nicht als „nicht gefunden“ anzeigen.
    Ergebnis: { liste:[{ nr, art, titel, zeilen, dateien }], zeilen:[für die Oberfläche], nr:{ <art>: n }, hinweise:[] } */
 function zusammenstellen(o) {

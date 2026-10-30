@@ -62,6 +62,25 @@ fall('Probenplan: alle Geschosse vor Einzelgeschossen; je Geschoss = eine Anlage
   assert.deepEqual(k.dateien, [`Pläne/Probenplan ${ORDNER} - Ergebniskarte.pdf`]);
 });
 
+fall('Plan eines anderen Projekts (in „Pläne“ kopiert) wird nie Anlage', () => {
+  const plan = { name: `Probenplan ${ORDNER}.probenplan`, t: t0 - 10 * min, sha: 'a'.repeat(64) };
+  let k = A.planFinden('probenplan', fotos([`Probenplan ${ORDNER}.pdf`, t0 - 5 * min], ['Probenplan 99.8888 Andere Straße Köln Ben.pdf', t0], ['Probenplan 99.8888 Andere Straße Köln Ben - Ergebniskarte.pdf', t0]), plan, ORDNER);
+  assert.deepEqual(k.dateien, [`Pläne/Probenplan ${ORDNER}.pdf`]);
+  k = A.planFinden('probenplan', fotos(['Probenplan 99.8888 Andere Straße Köln Ben.pdf', t0]), plan, ORDNER);
+  assert.equal(k, null);
+  assert.equal(A.planFinden('ergebniskarte', fotos(['Probenplan 99.8888 Andere Straße Köln Ben - Ergebniskarte.pdf', t0]), plan, ORDNER), null);
+});
+
+fall('Neu erzeugt unter gleichem Namen: eigene Abwahl gilt nicht mehr', () => {
+  const plan = { name: 'x.probenplan', t: t0 - 60 * min };
+  const alt = A.planFinden('probenplan', fotos([`Probenplan ${ORDNER}.pdf`, t0 - 30 * min]), plan, ORDNER);
+  const neu = A.planFinden('probenplan', fotos([`Probenplan ${ORDNER}.pdf`, t0]), plan, ORDNER);
+  assert.notEqual(alt.key, neu.key);
+  const wahl = { probenplan: { an: false, key: alt.key } };
+  assert.equal(A.zusammenstellen({ pruefberichte: [{ nr: 'AR-1', pdf: '' }], gefunden: { probenplan: alt }, wahl }).nr.probenplan, undefined, 'abgewählt bleibt abgewählt');
+  assert.equal(A.zusammenstellen({ pruefberichte: [{ nr: 'AR-1', pdf: '' }], gefunden: { probenplan: neu }, wahl }).nr.probenplan, 2, 'neue Fassung wieder vorgehakt');
+});
+
 fall('PlanKit-Word-Anlagen: Protokoll-Prüfsumme genau, sonst Dateizeit', () => {
   const sha = 'b'.repeat(64), plan = { t: t0 - 10 * min, sha };
   const datei = '99.9001_Anlage_Probenahme_2026-10-30.docx';
