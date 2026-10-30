@@ -340,7 +340,7 @@ function bericht(eingabe) {
   /* 3. Befund */
   const tab = { t: 'tab', caption: `Tabelle 1: ${zugestellt ? 'Zugestellte' : 'Entnommene'} ${eine ? 'Probe und Ergebnis' : 'Proben und Ergebnisse'}`,
     kopf: ['Probe', 'Labor-Nr.', 'Entnahmestelle', 'Material', 'Ergebnis'],
-    ausrichtung: ['center', 'center', 'left', 'left', 'left'],   // Kopfzeile bleibt linksbündig
+    ausrichtung: ['center', 'center', 'left', 'left', 'left'],   // gilt auch für den Spaltenkopf
     zeilen: proben.map(p => [p.nr ? String(p.nr) : (p.ref || p.label), p.labNr, p.stelle, p.material, p.befund ? p.befund.text : '–']) };
   const bf = [tab];
   if (pos.length === 0 && unklar.length === 0 && n) {

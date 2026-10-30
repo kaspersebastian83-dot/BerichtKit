@@ -87,7 +87,7 @@ function erstellen(D, m, bilder) {
     width: { size: w, type: WidthType.DXA }, borders: { top: duenn, bottom: duenn, left: duenn, right: duenn },
     shading: kopf ? { type: ShadingType.CLEAR, fill: 'EDEDED', color: 'auto' } : undefined,
     margins: { top: 60, bottom: 60, left: 90, right: 90 }, verticalAlign: VerticalAlign.CENTER,
-    children: [new Paragraph({ spacing: { ...LINE1, after: 0 }, alignment: !kopf && ausr === 'center' ? AlignmentType.CENTER : AlignmentType.LEFT, children: fest && typeof inhalt === 'string' && inhalt.includes('-') ? ohneUmbruch(inhalt, { size: 20 })
+    children: [new Paragraph({ spacing: { ...LINE1, after: 0 }, alignment: ausr === 'center' ? AlignmentType.CENTER : AlignmentType.LEFT, children: fest && typeof inhalt === 'string' && inhalt.includes('-') ? ohneUmbruch(inhalt, { size: 20 })
       : runs(inhalt === '' || inhalt == null ? '–' : inhalt, { size: 20, bold: !!kopf }) })],
   });
   const kinder = [];
@@ -107,7 +107,7 @@ function erstellen(D, m, bilder) {
       } else if (x.t === 'tab') {
         kinder.push(new Paragraph({ children: [t(x.caption, { italics: true, size: 22 })], keepNext: true, spacing: { ...LINE1, after: 120 } }));
         kinder.push(new Table({ width: { size: B, type: WidthType.DXA }, columnWidths: SPALTEN,
-          rows: [new TableRow({ tableHeader: true, children: x.kopf.map((k, i) => zelle(k, SPALTEN[i], true)) }),
+          rows: [new TableRow({ tableHeader: true, children: x.kopf.map((k, i) => zelle(k, SPALTEN[i], true, false, (x.ausrichtung || [])[i])) }),
             ...x.zeilen.map(z => new TableRow({ cantSplit: true, children: z.map((c, i) => zelle(c, SPALTEN[i], false, i === 1, (x.ausrichtung || [])[i])) }))] }));
         kinder.push(new Paragraph({ children: [], spacing: { ...LINE1, after: nach } }));
       }
