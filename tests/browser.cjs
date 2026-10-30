@@ -106,7 +106,7 @@ const daten = {
     assert.match(v, /Die Sachverständige.*Dr\. Tanja Test/s); assert.match(v, /Der Messtechniker.*Max Messer/s);
     assert.doesNotMatch(await page.textContent('#hinweise'), /Lücke im Bericht/);
 
-    if (process.env.BERICHT_AUSGABE) { await page.setViewportSize({ width: 1440, height: 1000 }); await page.screenshot({ path: path.join(process.env.BERICHT_AUSGABE, 'oberflaeche.png'), fullPage: false }); }
+    if (process.env.BERICHT_AUSGABE) { await page.setViewportSize({ width: 1440, height: 1000 }); await page.evaluate(() => window.scrollTo(0, 0)); await page.waitForSelector('#mosaikLeiste .ml-step'); await page.screenshot({ path: path.join(process.env.BERICHT_AUSGABE, 'oberflaeche.png'), fullPage: false }); }
     // Probe abwählen und wieder an
     await page.uncheck('input[data-art="aus"][data-l="P2"]');
     assert.doesNotMatch(await page.textContent('#vorschau'), /KMF/);
@@ -126,10 +126,45 @@ const daten = {
     assert.equal(buf.subarray(0, 2).toString(), 'PK', 'Word-Datei (ZIP)');
     assert.ok(buf.length > 20000);
     if (process.env.BERICHT_AUSGABE) { fs.mkdirSync(process.env.BERICHT_AUSGABE, { recursive: true }); fs.writeFileSync(path.join(process.env.BERICHT_AUSGABE, 'browser_1._Mitteilung_99.9001.docx'), buf); }
-    // Formular bleibt pro Projekt erhalten
+    // Angaben zum Bericht liegen für alle im Projektordner (_Spektron/BerichtKit/_BerichtKit.json) – auch der gespeicherte Bericht
+    const zustand = await page.evaluate(async P => {
+      const p = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('Archiv')).getDirectoryHandle(P);
+      const d = await (await p.getDirectoryHandle('_Spektron')).getDirectoryHandle('BerichtKit');
+      return JSON.parse(await (await (await d.getFileHandle('_BerichtKit.json')).getFile()).text());
+    }, PROJEKT);
+    assert.equal(zustand.format, 'spektron-bericht'); assert.equal(zustand.projekt, '99.9001');
+    assert.equal(zustand.form.probenehmer, 'Mes'); assert.equal(zustand.form.einbau, 'vor1996');
+    assert.deepEqual(zustand.berichte.map(b => b.datei), ['1._Mitteilung_99.9001.docx']);
+    // Zwei Rechner gleichzeitig: Ein Kollege ändert ein anderes Feld direkt in der Datei, hier wird gleichzeitig das Datum geändert –
+    // beide Änderungen bleiben erhalten, die des Kollegen erscheint auch hier.
+    const lesen = () => page.evaluate(async P => {
+      const p = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('Archiv')).getDirectoryHandle(P);
+      const d = await (await p.getDirectoryHandle('_Spektron')).getDirectoryHandle('BerichtKit');
+      return JSON.parse(await (await (await d.getFileHandle('_BerichtKit.json')).getFile()).text());
+    }, PROJEKT);
+    await page.evaluate(async P => {
+      const p = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('Archiv')).getDirectoryHandle(P);
+      const fh = await (await (await p.getDirectoryHandle('_Spektron')).getDirectoryHandle('BerichtKit')).getFileHandle('_BerichtKit.json');
+      const d = JSON.parse(await (await fh.getFile()).text()); d.form.agSatz = 'die Beispiel Versicherung AG'; d.geaendertVon = 'KOL';
+      const w = await fh.createWritable(); await w.write(JSON.stringify(d, null, 1)); await w.close();
+    }, PROJEKT);
+    await page.fill('#fDatum', '2026-10-28'); await page.dispatchEvent('#fDatum', 'change');
+    let gemischt = null;
+    for (let i = 0; i < 40 && !(gemischt && gemischt.form.datum === '2026-10-28'); i++) { await page.waitForTimeout(150); gemischt = await lesen(); }
+    assert.equal(gemischt.form.datum, '2026-10-28', 'eigene Änderung gespeichert');
+    assert.equal(gemischt.form.agSatz, 'die Beispiel Versicherung AG', 'Änderung des Kollegen bleibt');
+    assert.equal(await page.inputValue('#fAg'), 'die Beispiel Versicherung AG', 'und erscheint auch hier');
+    // Spektron-Leiste: BerichtKit ist der eigene Schritt, die anderen Apps sind Links mit demselben Projekt
+    await page.waitForSelector('#mosaikLeiste .ml-step.hier');
+    assert.match(await page.textContent('#mosaikLeiste .ml-step.hier'), /BerichtKit/);
+    assert.equal(await page.locator('#mosaikLeiste a.ml-step').count(), 5);
+    // Ein Kollege (anderer Browser, leerer Speicher) sieht dieselben Angaben
+    await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('berichtkit:form:')) localStorage.removeItem(k); });
     await page.reload(); await page.waitForSelector('#app:not([hidden]) .blatt');
     assert.equal(await page.inputValue('#fPn'), 'Mes');
+    assert.equal(await page.inputValue('#fMitteilung'), '1');
+    assert.match(await page.textContent('#hinweise'), /Angaben zum Bericht aus dem Projektordner/);
     assert.deepEqual(fehler, [], 'keine Fehler in der Konsole');
-    console.log('ok – BerichtKit im Browser: öffnen, Vorschau, Einstellungen, Word-Datei in „Mitteilungen“');
+    console.log('ok – BerichtKit im Browser: öffnen, Vorschau, Einstellungen, Word-Datei in „Mitteilungen“, Angaben im Projektordner, Spektron-Leiste');
   } catch (e) { console.log('DIALOGE', dialoge, 'FEHLER', fehler); throw e; } finally { await browser.close(); server.close(); }
 })().catch(e => { console.error(e); process.exit(1); });

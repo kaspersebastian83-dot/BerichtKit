@@ -32,6 +32,12 @@ jobs:
           SPEKTRON_ORDNER_PFLICHT: '1'
       - name: Textbausteine (alle Berichtsvarianten)
         run: node tests/text.cjs
+      - name: LabelKit daneben holen (Spektron-Leiste byte-gleich prüfen)
+        env:
+          ZWEIG: ${{ github.head_ref }}
+        run: git clone --quiet --depth 1 --branch "$ZWEIG" https://github.com/kaspersebastian83-dot/labelkit.git ../labelkit 2>/dev/null || git clone --quiet --depth 1 https://github.com/kaspersebastian83-dot/labelkit.git ../labelkit
+      - name: Offline-Dateien und Leiste
+        run: node tests/sw.cjs
 
   browser-tests:
     name: Browser test (chromium)

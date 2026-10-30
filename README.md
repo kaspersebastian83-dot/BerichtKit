@@ -16,13 +16,22 @@ Adresse: `https://kaspersebastian83-dot.github.io/berichtkit/` · aus der Projek
 | Namen | Projektzentrale | `<Archiv>/_Spektron-Mitarbeiter.json` |
 | Rollen, Frau/Herr, Labor | BerichtKit „Einstellungen“ | `<Archiv>/_Spektron-BerichtKit.json` |
 | Unterschriften | von Hand abgelegt | `<Archiv>/_Spektron-Unterschriften/<Kürzel>.png` |
+| Angaben zum Bericht (Variante, Daten, Personen, Auswahl der Proben und Fotos) | BerichtKit, gemeinsam für alle | `_Spektron/BerichtKit/_BerichtKit.json` (Vor Spektron: `Mitteilungen/`) |
 
-Die Ablageorte im Projekt bestimmt das gemeinsame Modul `spektron-ordner.js` (byte-gleich mit der Projektzentrale, in CI geprüft).
+Die Ablageorte im Projekt bestimmt das gemeinsame Modul `spektron-ordner.js` (Bereich `berichtkit`; byte-gleich mit der Projektzentrale, in CI geprüft).
+
+## In der Suite
+
+- **Projektzentrale:** Knopf „Asbestbericht“ in Stufe 4 (Gutachten) öffnet BerichtKit mit dem Projekt (`#projekt=<Ordnername>`).
+- **Spektron-Leiste** oben (`mosaik-leiste.js`, Block byte-gleich mit LabelKit, FotoKit, ResultKit, PlanKit, BelegKit): BerichtKit ist der Schritt nach PlanKit; Haken, sobald ein Bericht `<n>._Mitteilung_<Nr>.docx` in „Mitteilungen“ liegt.
+- **Gemeinsame Angaben:** Was im Formular eingestellt wird, liegt in `_BerichtKit.json` im Projekt und gilt für alle Kollegen. Hat jemand inzwischen gespeichert, lädt BerichtKit dessen Stand und meldet es – nichts wird stumm überschrieben. Dazu die Liste der gespeicherten Berichte (Datei, Zeit, Kürzel aus „Ich bin …“).
+- **Offline:** Service Worker „Netz zuerst“ wie in der Projektzentrale (`sw.js`).
+- **Handbuch:** Knopf „📘 Handbuch“ öffnet AidKit, Kapitel `#app-berichtkit` („BerichtKit Schritt für Schritt“).
 
 ## Regeln
 
 - **Nur lesen** – BerichtKit ändert keine Projektdatei der anderen Apps. Es schreibt nur die Word-Datei nach `Mitteilungen/`
-  (vorhandene Datei: Rückfrage, sonst „… (2).docx“) und die Einstellungen in den Archivordner.
+  (vorhandene Datei: Rückfrage, sonst „… (2).docx“), seine eigenen Angaben (`_BerichtKit.json`) und die Einstellungen in den Archivordner.
 - **Laborwerte und Probenbezeichnungen werden nie bearbeitet.** Ergebnistexte kommen wörtlich aus dem Prüfbericht (über ResultKit).
   Einzige Ausnahme: ein KI-Wert, der nicht in den Labordaten steht, kann aus dem PDF eingetragen werden (im Formular markiert).
 - **Nichts wird erfunden.** Fehlt eine Angabe, steht sie im Bericht als gelb markierte Lücke, z. B. `[Auftragsdatum]`.
@@ -41,6 +50,7 @@ Die Formatierung (A4, Arial 12, 1,5-zeilig, Deckblatt mit Logo, Kopfzeilen, „S
 
 ```
 node tests/text.cjs              # alle Berichtsvarianten (Textbausteine)
+node tests/sw.cjs                # Offline-Dateien vollständig; Leiste gleich wie LabelKit (falls ../labelkit daneben)
 node tests/spektron-ordner.cjs   # gemeinsames Modul (mit ../projektzentrale byte-gleich)
 node tests/browser.cjs           # im Browser: öffnen, Vorschau, Einstellungen, Word-Datei (Playwright)
 node tests/render-beispiele.cjs <Ordner>   # Beispielberichte als .docx zum Ansehen (nicht in CI)
