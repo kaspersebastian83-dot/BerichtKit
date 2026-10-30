@@ -146,7 +146,9 @@ const daten = {
     assert.match(await page.textContent('#meldungen'), /Daten neu gelesen \(\d\d:\d\d\): Laborergebnisse \(ResultKit\) – die Vorschau zeigt jetzt den neuen Stand\./);
     // Ohne Fokus geändert (z. B. zweiter Bildschirm): vor dem Herunterladen neu gelesen, erst ansehen, dann noch einmal klicken
     await projektDatei(ergPfad, ergAlt);
-    await page.click('#btnLaden');
+    // Statuszeile leeren: „… erst ansehen“ bleibt sonst bis zu 8 s stehen und würde den nächsten Halt vortäuschen
+    const statusLeer = () => page.evaluate(() => { S.statusFest = null; document.getElementById('status').textContent = ''; });
+    await statusLeer(); await page.click('#btnLaden');
     await page.waitForSelector('#status .warn');
     assert.match(await page.textContent('#status'), /Die Daten haben sich inzwischen geändert – schau dir die Vorschau an und klick dann noch einmal\./);
     assert.match(await page.textContent('#meldungen'), /Daten neu gelesen vor dem Speichern|Daten neu gelesen \(/);
@@ -204,14 +206,14 @@ const daten = {
     await page.fill('#fMitteilung', '1'); await page.dispatchEvent('#fMitteilung', 'change');
     // vorher noch ein geänderter Laborwert: Speichern hält an, die Datei bleibt unberührt
     await projektDatei(ergPfad, ergAlt.replace('"r":"5 - 20"', '"r":"10 - 50"'));
-    await page.click('#btnErstellen');
+    await statusLeer(); await page.click('#btnErstellen');
     await page.waitForSelector('#status .warn');
     assert.match(await page.textContent('#meldungen'), /Daten neu gelesen vor dem Speichern \(\d\d:\d\d\): Laborergebnisse \(ResultKit\)/);
     assert.ok(!(await page.evaluate(() => document.getElementById('dlgErsetzen').open)), 'noch keine Rückfrage');
     assert.equal(await projektDatei('Mitteilungen/1._Mitteilung_99.9001.docx'), 'alt');
     // Fokus und Klick fast gleichzeitig (zurück aus ResultKit, gleich auf „Speichern“): auch dann einmal anhalten
     await projektDatei(ergPfad, ergAlt); await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-    await page.click('#btnErstellen');
+    await statusLeer(); await page.click('#btnErstellen');
     await page.waitForFunction(() => /Chrysotil, 5 - 20 %/.test(document.getElementById('vorschau').textContent));
     await page.waitForSelector('#status .warn');
     assert.ok(!(await page.evaluate(() => document.getElementById('dlgErsetzen').open)), 'erst ansehen');
@@ -223,7 +225,8 @@ const daten = {
     assert.equal(await page.evaluate(() => document.activeElement.id), 'ersAbbrechen', 'Abbrechen hat den Fokus');
     await page.keyboard.press('Enter');   // Enter = Abbrechen
     await page.waitForSelector('#dlgErsetzen', { state: 'hidden' });
-    assert.match(await page.textContent('#status'), /Nicht gespeichert – „1\._Mitteilung_99\.9001\.docx“ ist unverändert\./);
+    // „close“ kommt als eigene Aufgabe nach dem Schließen – auf die Statuszeile warten, nicht sofort lesen
+    await page.waitForFunction(() => /Nicht gespeichert – „1\._Mitteilung_99\.9001\.docx“ ist unverändert\./.test(document.getElementById('status').textContent));
     assert.equal(await projektDatei('Mitteilungen/1._Mitteilung_99.9001.docx'), 'alt', 'Abbrechen speichert nichts');
     await ersetzen(); await page.keyboard.press('Escape'); await page.waitForSelector('#dlgErsetzen', { state: 'hidden' });
     assert.equal(await projektDatei('Mitteilungen/1._Mitteilung_99.9001.docx'), 'alt', 'Esc speichert nichts');
