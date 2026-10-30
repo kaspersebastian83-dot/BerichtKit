@@ -3,9 +3,10 @@
    Schreibt nur: die Word-Datei in „Mitteilungen“ und – über „Einstellungen“ – _Spektron-BerichtKit.json im Archivordner.
    Laborwerte und Probenbezeichnungen werden nie bearbeitet; fehlende Angaben erscheinen im Bericht gelb markiert. */
 'use strict';
-const APP_VERSION = '1.4.1';
+const APP_VERSION = '1.5.0';
 const APP_DATE = '30.10.2026';
 const CHANGELOG = [
+  ['1.5.0', '30.10.2026', 'Frau/Herr im Text ohne Einstellungen: Frau Dr. Pütt und Frau Jung, alle anderen aus dem Büro Herr (Einstellung geht vor; in der Unterschrift weiterhin ohne Anrede). Tabelle 1: Spalte „Probe“ nur mit der Nummer, Nummer und Labor-Nr. zentriert. Material: ist „Bauteil / Material“ in LabelKit leer, kommt es aus der Matrix (z. B. „Putz / Spachtelmasse“) – mit Hinweis.'],
   ['1.4.1', '30.10.2026', 'Projektprüfung vergleicht nur noch die Projektnummer: Steht im LabelKit-Feld „Projektnummer“ zusätzlich die Adresse (ältere Projekte, z. B. „26.0512 Stegerwaldstraße Leverkusen“), wird das Speichern nicht mehr fälschlich gesperrt. Eine andere Nummer sperrt weiter.'],
   ['1.4.0', '30.10.2026', 'Deckblatt „mit Versicherung“ (VN · Risiko · Versicherer) oder „ohne Versicherung“ (Auftraggeber · Schadenort) unter „Auftrag“ umstellbar – z. B. für Hausverwaltung, Sanierer oder Privatauftrag. Ohne Wahl entscheiden die Projektdaten: Versicherer eingetragen → mit; kein VN → ohne; VN da, aber der Auftraggeber ist keine Versicherung → ohne (mit Hinweis). Unterschriften: Jede Unterschrift kann jede Person sein, mit „als Sachverständige(r)“ oder „als Messtechniker(in)“ – vorgewählt nach den Einstellungen, für diesen Bericht änderbar (z. B. Messtechniker allein).'],
   ['1.3.0', '30.10.2026', 'Prüfungen vor dem Speichern: Versicherer aus der Projektzentrale (Feld „Versicherer“), sonst sichtbar „angenommen“; Probenehmer nur bei genauem Namen aus dem LabelKit-Feldbogen, sonst Hinweis „angenommen – bitte prüfen“ mit „✓ stimmt“; es zählt die LabelKit-Datei, die ResultKit übernommen hat; Entnahmestelle LabelKit ↔ Prüfbericht wird verglichen (vorerst Hinweis). Gesperrt wird „In Mitteilungen speichern“, wenn die LabelKit-Datei zu einem anderen Projekt gehört oder eine LabelKit-Probe noch kein Ergebnis hat (abwählbar) – dann gibt es nur „Entwurf herunterladen“ mit Kopfzeile „ENTWURF – nicht versenden“ und „_ENTWURF“ im Namen. Vorläufiger Prüfbericht: Hinweis und Kopfzeile „Vorläufig“. Gespeicherte Berichte merken sich die Prüfbericht-PDFs (Anlagen) und die Zahl der Lücken; danach „Ans Büro übergeben →“ in der Projektzentrale.'],
@@ -432,7 +433,7 @@ function vorschau(m) {
     for (const x of a.inhalt) {
       if (x.t === 'p') teile.push(`<p>${runsHtml(x.runs)}</p>`);
       else if (x.t === 'fig') teile.push(`<figure>${S.thumbs[x.datei] ? `<img src="${S.thumbs[x.datei]}" alt="">` : `<span class="ersatz" data-thumb="${esc(x.datei)}">${esc(x.datei)}</span>`}<figcaption>${esc(x.caption)}</figcaption></figure>`);
-      else if (x.t === 'tab') teile.push(`<div class="tabtitel">${esc(x.caption)}</div><table><tr>${x.kopf.map(k => `<th>${esc(k)}</th>`).join('')}</tr>${x.zeilen.map(z => `<tr>${z.map(c => `<td>${esc(c || '–')}</td>`).join('')}</tr>`).join('')}</table>`);
+      else if (x.t === 'tab') teile.push(`<div class="tabtitel">${esc(x.caption)}</div><table><tr>${x.kopf.map(k => `<th>${esc(k)}</th>`).join('')}</tr>${x.zeilen.map(z => `<tr>${z.map((c, i) => `<td${(x.ausrichtung || [])[i] === 'center' ? ' style="text-align:center"' : ''}>${esc(c || '–')}</td>`).join('')}</tr>`).join('')}</table>`);
     }
   }
   teile.push(`<p style="margin-top:20px">${esc(m.ortDatum)}</p><div class="sig">${m.unterschriften.map(u => {
@@ -539,7 +540,7 @@ function einstellungenOeffnen() {
     const vorschlag = T.person({ personen: { [k]: { ...p, satz: '' } } }, S.mitarbeiter, k);
     return `<tr data-k="${esc(k)}"><td>${esc(k)}</td>
       <td><input type="text" data-f="name" value="${esc(p.name || '')}" placeholder="${esc(ma.name || '')}" title="Leer = Name aus der Projektzentrale; z. B. mit akademischem Grad"></td>
-      <td><select data-f="geschlecht"><option value="">–</option><option value="w" ${p.geschlecht === 'w' ? 'selected' : ''}>Frau</option><option value="m" ${p.geschlecht === 'm' ? 'selected' : ''}>Herr</option></select></td>
+      <td><select data-f="geschlecht"><option value="">${({ w: 'Frau (Standard)', m: 'Herr (Standard)' })[T.anredeStandard(p.name || ma.name || '')] || '–'}</option><option value="w" ${p.geschlecht === 'w' ? 'selected' : ''}>Frau</option><option value="m" ${p.geschlecht === 'm' ? 'selected' : ''}>Herr</option></select></td>
       <td><select data-f="rolle"><option value="sv">Sachverständige(r)</option><option value="mt" ${p.rolle === 'mt' ? 'selected' : ''}>Messtechniker(in)</option></select></td>
       <td><input type="text" data-f="satz" value="${esc(p.satz || '')}" placeholder="${esc(vorschlag ? vorschlag.satz : '')}" title="„… wurde durch ___ entnommen“ – leer = Vorschlag"></td>
       <td>${S.sig[k.toLowerCase()] ? '<span class="ok">✓ vorhanden</span>' : `<span class="klein">fehlt (${esc(k)}.png)</span>`}</td></tr>`;

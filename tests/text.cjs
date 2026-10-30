@@ -19,7 +19,7 @@ fall('Probenahme durch uns, eine positive Probe, Versicherungsfall', () => {
   assert.match(t, /Die Probe wurde der Eurofins Beispiel-Labor GmbH zur Untersuchung auf Asbest übergeben\. Die Ergebnisse sind im beigefügten Prüfbericht Nr\. AR-999-2026-000001-01 dokumentiert \(Anlage 1\)\./);
   assert.match(t, /Abb\. 1: Fliesenkleber, Umkleide Schwimmbad\./);
   assert.match(t, /Tabelle 1: Entnommene Probe und Ergebnis/);
-  assert.match(t, /Probe 1 \| 999-2026-0000101 \| Umkleide Schwimmbad \| Fliesenkleber \| Chrysotil, 5 - 20 %/);
+  assert.match(t, /\n1 \| 999-2026-0000101 \| Umkleide Schwimmbad \| Fliesenkleber \| Chrysotil, 5 - 20 %/);
   assert.match(t, /In Probe 1 \(Material: Fliesenkleber\) wurde Asbest nachgewiesen: Chrysotil, 5 - 20 %\./);
   assert.match(t, /Bei dem Material „Fliesenkleber“ \(Probe 1\) handelt es sich um ein asbesthaltiges Material\. Bei allen Tätigkeiten, bei denen dieses Material bearbeitet, beschädigt oder entfernt wird, sind die Gefahrstoffverordnung \(GefStoffV\) und die TRGS 519/);
   assert.deepEqual(m.unterschriften.map(u => u.rolle + ' ' + u.name), ['Die Sachverständige Dr. Tanja Test', 'Der Messtechniker Max Messer']);
@@ -267,4 +267,33 @@ fall('Unterschriften: Rolle je Unterschrift wählbar (Messtechniker allein, SV a
   assert.deepEqual(u({ sv: 'Tst', mt: 'Mes', variante: 'zugestellt' }), ['Die Sachverständige Dr. Tanja Test'], 'zugestellt: nur eine Unterschrift');
   assert.ok(!T.bericht({ ...basis, form: form({ sv: 'Mes', mt: '' }) }).hinweise.some(h => /unterschreibt hier aber/.test(h)));
 });
+fall('Frau/Herr ohne Einstellungen: Büro-Standard nach Nachname, Einstellung geht vor, Unterschrift ohne Anrede', () => {
+  const buero = [{ ordnerKuerzel: 'Ric', name: 'Dr. Ricarda Pütt' }, { ordnerKuerzel: 'Nad', name: 'Nadine Jung' },
+    { ordnerKuerzel: 'Ste', name: 'Stefan Cremer' }, { ordnerKuerzel: 'Dr.Ka', name: 'Dr. Sebastian Kasper' },
+    { ordnerKuerzel: 'Ben', name: 'Benjamin Grund' }, { ordnerKuerzel: 'Luc', name: 'Lucas vom Dorp' }, { ordnerKuerzel: 'Neu', name: 'Nils Neu' }];
+  const satz = k => T.person({ personen: {} }, buero, k).satz;
+  assert.deepEqual(['Ric', 'Nad', 'Ste', 'Dr.Ka', 'Ben', 'Luc', 'Neu'].map(satz),
+    ['Frau Dr. Pütt', 'Frau Jung', 'Herrn Cremer', 'Herrn Dr. Kasper', 'Herrn Grund', 'Herrn vom Dorp', 'Nils Neu']);
+  assert.equal(T.person({ personen: { Nad: { geschlecht: 'm' } } }, buero, 'Nad').satz, 'Herrn Jung');   // Einstellung geht vor
+  assert.equal(T.anredeStandard('Dr. Ricarda Pütt'), 'w');                                          // zerlegtes ü
+  const m = T.bericht({ pj: D.pj(), lk: D.lk([[1, '2026-10-16', 'Umkleide Schwimmbad', 'Fliesenkleber', 'Bituminöse Proben / Kleber']]),
+    erg: D.erg([[1, 'chrysotil']]), cfg: { personen: {} }, mitarbeiter: buero, form: form({ probenehmer: 'Ste', sv: 'Ric', mt: 'Ste' }) });
+  assert.match(alles(m), /wurde durch Herrn Cremer \(Sachverständigenbüro/);
+  assert.deepEqual(m.unterschriften.map(u => u.rolle + ' ' + u.name), ['Die Sachverständige Dr. Ricarda Pütt', 'Der Sachverständige Stefan Cremer']);
+  assert.ok(!m.hinweise.some(h => /fehlt Frau\/Herr/.test(h)));
+});
+
+fall('Tabelle 1: Probe nur als Nummer, Nummer und Labor-Nr. zentriert; Material aus der Matrix, wenn „Bauteil / Material“ leer ist', () => {
+  const m = T.bericht({ pj: D.pj(), lk: D.lk([[1, '2026-10-16', 'EG Bad', '', 'Putze / Spachtelmassen'], [2, '2026-10-16', 'EG Flur', 'Fliesenkleber', 'Putze / Spachtelmassen'], [3, '2026-10-16', 'Keller', '', 'Sonstige']]),
+    erg: D.erg([[1, 'kein'], [2, 'kein'], [3, 'kein']]), cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form() });
+  const tab = m.abschnitte.flatMap(a => a.inhalt).find(x => x.t === 'tab');
+  assert.deepEqual(tab.zeilen.map(z => [z[0], z[3]]), [['1', 'Putz / Spachtelmasse'], ['2', 'Fliesenkleber'], ['3', '']]);
+  assert.deepEqual(tab.kopf, ['Probe', 'Labor-Nr.', 'Entnahmestelle', 'Material', 'Ergebnis']);
+  assert.deepEqual(tab.ausrichtung, ['center', 'center', 'left', 'left', 'left']);
+  assert.ok(m.hinweise.some(h => /Probe 1: Material „Putz \/ Spachtelmasse“ aus der LabelKit-Matrix übernommen/.test(h)));
+  assert.ok(m.hinweise.some(h => /Probe 3: Material fehlt/.test(h)));
+  assert.equal(T.matrixMaterial('Faserzementprodukte (z.B. Eternit)'), 'Faserzement');
+  assert.equal(T.matrixMaterial('Luft (Raumluft)'), '');
+});
+
 console.log(`\n${n} Fälle bestanden.`);
