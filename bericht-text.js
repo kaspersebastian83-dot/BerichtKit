@@ -26,6 +26,31 @@ function zeilen(v) { return s(v).split(/\s*[\n;]\s*|,\s+/).map(x => x.trim()).fi
 /** Erste Zeile (Name) */
 const nameVon = v => zeilen(v)[0] || '';
 const PNR = v => { const m = /(\d+)\s*$/.exec(s(v)); return m ? +m[1] : null; };
+const gleicherName = (a, b) => !!a && a.toLowerCase().replace(/\s+/g, ' ') === s(b).toLowerCase().replace(/\s+/g, ' ');
+
+/* ---------- Auftraggeber und Objekt im Fließtext ---------- */
+/** Auftraggeber mit Artikel für „… durch <X> beauftragt / zugestellt“ (Akkusativ). Unbekannt → unverändert, artikel:false. */
+const SCHON_MIT = /^(?:die|der|den|das|dem|des|Herrn|Frau|Firma|Fa\.|Familie|Eheleute)\s/i;
+const DIE = /\b(?:g?GmbH|mbH|mbB|AG|eG|KG|KGaA|OHG|oHG|GbR|UG|SE|PartG\w*|Ltd\.?)(?=$|[\s,.&)])|(?:gesellschaft|genossenschaft|gemeinschaft|versicherung|verwaltung|stiftung|gemeinde|anstalt|kasse|bank|universität|hochschule)\b|^(?:Stadt|WEG)\b/i;
+const DEN = /\b(?:e\.\s?V\.|Verein|Verband|Kreis|Landkreis|Zweckverband|Eigenbetrieb)(?=$|[\s,.)])/i;
+const DAS = /^(?:Land|Bistum|Erzbistum|Amt|Unternehmen)\s/i;
+function mitArtikel(name) {
+  const n = s(name); if (!n) return { text: '', artikel: true };
+  if (SCHON_MIT.test(n)) return { text: n, artikel: true };
+  if (/^Herr\s/i.test(n)) return { text: n.replace(/^Herr\s/i, 'Herrn '), artikel: true };
+  if (DAS.test(n)) return { text: 'das ' + n, artikel: true };
+  if (DEN.test(n)) return { text: 'den ' + n, artikel: true };
+  if (DIE.test(n)) return { text: 'die ' + n, artikel: true };
+  return { text: n, artikel: false };
+}
+/** Objekt für den Fließtext: steht die Lage (z. B. „2. OG rechts“, „Wohnung …“) vor der Adresse, kommt sie in Klammern ans Ende. */
+const LAGE = /^(?:Wohnung|Whg\.?|Etage|Einheit|Büro|Laden|Praxis)\b|\b(?:\d+\.\s*)?(?:OG|EG|DG|UG|KG|SB|Obergeschoss|Erdgeschoss|Dachgeschoss|Untergeschoss|Kellergeschoss|Souterrain|Hochparterre)\b/i;
+const STRASSE = /\d+\s*[a-z]?(?:\s*[-–\/]\s*\d+\s*[a-z]?)?$|(?:str\.|straße|strasse|weg|platz|allee|ring|gasse|damm|ufer|chaussee)\b/i;
+function objektImSatz(v) {
+  const z = zeilen(v);
+  if (z.length > 1 && LAGE.test(z[0]) && !STRASSE.test(z[0]) && !/^\d{5}\s/.test(z[0])) return `${z.slice(1).join(', ')} (${z[0]})`;
+  return z.join(', ');
+}
 
 /* ---------- Asbest-Befund (Logik wie ResultKit asbestBefund, src/uebersicht.ts – Trenner im Bericht „, “) ---------- */
 const ASBEST = /asbest|chrysotil|amosit|krokydolith|tremolit|aktinolith|anthophyllit/i;
@@ -167,8 +192,13 @@ function bericht(eingabe) {
 
   // Deckblatt-Feldblock
   const felder = [];
+  // Versicherer: Eingabe, sonst Auftraggeber aus der Projektzentrale (dort steht im Versicherungsfall die Versicherung) –
+  // aber nicht, wenn der Auftraggeber der VN selbst ist (dann ist der Versicherer unbekannt → Lücke statt falscher Angabe).
+  const agIstVn = P.versicherungsfall && gleicherName(nameVon(P.ag), nameVon(P.vn));
+  const versicherer = s(f.versicherer) || (agIstVn ? '' : nameVon(P.ag));
+  if (P.versicherungsfall && agIstVn && !s(f.versicherer)) hinweise.push('Auftraggeber und VN sind gleich – Versicherer bitte unter „Versicherer“ eintragen.');
   if (P.versicherungsfall) {
-    felder.push(['VN:', zeilen(P.vn)], ['Risiko:', zeilen(P.objekt)], ['Versicherer:', [nameVon(P.ag)].filter(Boolean)]);
+    felder.push(['VN:', zeilen(P.vn)], ['Risiko:', zeilen(P.objekt)], ['Versicherer:', [versicherer].filter(Boolean)]);
   } else {
     felder.push(['Auftraggeber:', zeilen(P.ag)], ['Schadenort:', zeilen(P.objekt)]);
   }
@@ -180,8 +210,12 @@ function bericht(eingabe) {
     [P.versicherungsfall ? 'Risiko: ' : 'Schadenort: ', L(zeilen(P.objekt).join(', '), 'Objekt')]];
 
   /* 1. Veranlassung */
-  const objekt = L(zeilen(P.objekt).join(', '), 'Objekt');
-  const agSatz = L(s(f.agSatz) || nameVon(P.ag), 'Auftraggeber');
+  const objekt = L(objektImSatz(P.objekt), 'Objekt');
+  // Auftraggeber im Satz: eigene Eingabe bleibt, wie sie ist; der unveränderte Name aus der Projektzentrale bekommt den Artikel.
+  const agEingabe = s(f.agSatz), agName = nameVon(P.ag);
+  const agArt = !agEingabe || agEingabe === agName ? mitArtikel(agName) : { text: agEingabe, artikel: true };
+  if (agArt.text && !agArt.artikel) hinweise.push(`Auftraggeber im Satz: „durch ${agArt.text} beauftragt“ – Artikel prüfen (z. B. „die …“, „Herrn …“).`);
+  const agSatz = L(agArt.text, 'Auftraggeber');
   const v = [];
   if (!zugestellt) {
     v.push({ t: 'p', runs: ['Am ', L(datumDE(f.auftragsdatum || P.auftragsdatum), 'Auftragsdatum'), ' wurde unser Büro durch ', agSatz,
@@ -269,8 +303,10 @@ function bericht(eingabe) {
   if (sv) unterschriften.push({ kuerzel: sv.kuerzel, rolle: rollentext(sv), name: sv.name });
   else unterschriften.push({ kuerzel: '', rolle: 'Sachverständige(r)', name: { gap: '[Sachverständige(r)]' } });
   if (mt && (!sv || mt.kuerzel !== sv.kuerzel)) unterschriften.push({ kuerzel: mt.kuerzel, rolle: rollentext(mt), name: mt.name });
+  if (sv && pn && sv.kuerzel === pn.kuerzel && !((e.cfg && e.cfg.personen) || {})[sv.kuerzel] && !zugestellt)
+    hinweise.push(`${sv.name} hat die Proben genommen und unterschreibt als Sachverständige(r) – Rolle in den Einstellungen noch nicht festgelegt (Messtechniker?).`);
   if (sv && sv.rolle === 'mt') hinweise.push(`${sv.name} ist in den Einstellungen als Messtechniker eingetragen, unterschreibt hier aber als Sachverständige(r).`);
-  [sv, pn, mt].filter(Boolean).forEach(p => { if (!p.geschlecht) hinweise.push(`${p.name}: in den Einstellungen fehlt Frau/Herr.`); });
+  [sv, pn, mt].filter((p, i, xs) => p && xs.findIndex(q => q && q.kuerzel === p.kuerzel) === i).forEach(p => { if (!p.geschlecht) hinweise.push(`${p.name}: in den Einstellungen fehlt Frau/Herr.`); });
   const anlagen = (berichtNr.length ? berichtNr : ['']).map((nr, i) =>
     [`Anlage ${i + 1}: Prüfbericht Nr. `, L(nr, 'Prüfbericht-Nr.'), ' (', L(labor, 'Labor'), ')']);
 
@@ -298,7 +334,7 @@ function luecken(m) {
 /** Runs → reiner Text (Lücken in eckigen Klammern) */
 const text = runs => (Array.isArray(runs) ? runs : [runs]).map(r => (r && typeof r === 'object' ? r.gap : String(r == null ? '' : r))).join('');
 
-const API = { VERSION: 1, bericht, asbestBefund, kmfWerte, person, rollentext, namensteile, datumDE, zeilen, liste, zahlwort, probenSammeln, projektSicht, text };
+const API = { VERSION: 1, bericht, asbestBefund, kmfWerte, person, rollentext, namensteile, datumDE, zeilen, liste, zahlwort, probenSammeln, projektSicht, text, mitArtikel, objektImSatz };
 if (typeof module === 'object' && module.exports) module.exports = API;
 root.BerichtText = API;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -9,7 +9,7 @@
 function erstellen(D, m, bilder) {
   const { Document, Paragraph, TextRun, ImageRun, Header, Table, TableRow, TableCell, WidthType, BorderStyle, AlignmentType,
     TabStopType, PageNumber, ShadingType, HorizontalPositionRelativeFrom, VerticalPositionRelativeFrom, TextWrappingType,
-    SectionType, VerticalAlign, UnderlineType } = D;
+    SectionType, VerticalAlign, UnderlineType, NoBreakHyphen } = D;
   const FONT = 'Arial';
   const cmPx = cm => cm / 2.54 * 96, cmEmu = cm => Math.round(cm * 360000);
   const LINE15 = { line: 360, lineRule: 'auto' }, LINE1 = { line: 240, lineRule: 'auto' };
@@ -68,12 +68,15 @@ function erstellen(D, m, bilder) {
   const NONE = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, duenn = { style: BorderStyle.SINGLE, size: 4, color: '808080' };
   const ueberschrift = text => new Paragraph({ children: [t(text, { underline: { type: UnderlineType.SINGLE } })], spacing: { ...LINE15, before: 240, after: 240 }, keepNext: true, outlineLevel: 0 });
   const absatz = r => new Paragraph({ children: runs(r), alignment: AlignmentType.JUSTIFIED, spacing: { ...LINE15, after: 240 } });
-  const SPALTEN = [950, 1950, 2270, 1850, 2050];
-  const zelle = (inhalt, w, kopf) => new TableCell({
+  const SPALTEN = [950, 2080, 2240, 1850, 1950];     // Labor-Nr. breit genug für „777-2026-00445679“ in einer Zeile
+  /* Labor-Nr.: geschützte Bindestriche, damit Word die Nummer nicht am Bindestrich umbricht */
+  const ohneUmbruch = (text, o) => [new TextRun({ font: FONT, ...o, children: String(text).split('-').flatMap((x, i) => (i ? [new NoBreakHyphen(), x] : [x])).filter(x => x !== '') })];
+  const zelle = (inhalt, w, kopf, fest) => new TableCell({
     width: { size: w, type: WidthType.DXA }, borders: { top: duenn, bottom: duenn, left: duenn, right: duenn },
     shading: kopf ? { type: ShadingType.CLEAR, fill: 'EDEDED', color: 'auto' } : undefined,
     margins: { top: 60, bottom: 60, left: 90, right: 90 }, verticalAlign: VerticalAlign.CENTER,
-    children: [new Paragraph({ spacing: { ...LINE1, after: 0 }, children: runs(inhalt === '' || inhalt == null ? '–' : inhalt, { size: 20, bold: !!kopf }) })],
+    children: [new Paragraph({ spacing: { ...LINE1, after: 0 }, children: fest && typeof inhalt === 'string' && inhalt.includes('-') ? ohneUmbruch(inhalt, { size: 20 })
+      : runs(inhalt === '' || inhalt == null ? '–' : inhalt, { size: 20, bold: !!kopf }) })],
   });
   const kinder = [];
   for (const a of m.abschnitte) {
@@ -92,7 +95,7 @@ function erstellen(D, m, bilder) {
         kinder.push(new Paragraph({ children: [t(x.caption, { italics: true, size: 22 })], keepNext: true, spacing: { ...LINE1, after: 120 } }));
         kinder.push(new Table({ width: { size: B, type: WidthType.DXA }, columnWidths: SPALTEN,
           rows: [new TableRow({ tableHeader: true, children: x.kopf.map((k, i) => zelle(k, SPALTEN[i], true)) }),
-            ...x.zeilen.map(z => new TableRow({ cantSplit: true, children: z.map((c, i) => zelle(c, SPALTEN[i], false)) }))] }));
+            ...x.zeilen.map(z => new TableRow({ cantSplit: true, children: z.map((c, i) => zelle(c, SPALTEN[i], false, i === 1)) }))] }));
         kinder.push(new Paragraph({ children: [], spacing: { ...LINE1, after: 240 } }));
       }
     }

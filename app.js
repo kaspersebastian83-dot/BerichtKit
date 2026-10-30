@@ -3,9 +3,10 @@
    Schreibt nur: die Word-Datei in „Mitteilungen“ und – über „Einstellungen“ – _Spektron-BerichtKit.json im Archivordner.
    Laborwerte und Probenbezeichnungen werden nie bearbeitet; fehlende Angaben erscheinen im Bericht gelb markiert. */
 'use strict';
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 const APP_DATE = '30.10.2026';
 const CHANGELOG = [
+  ['1.2.0', '30.10.2026', 'Feinschliff nach dem ersten echten Bericht (26.0512): Versicherer als eigenes Feld – ist der Auftraggeber der VN selbst, erscheint er nicht mehr als Versicherer, sondern als Lücke; Auftraggeber im Satz mit Artikel („durch die … eG“); Lage wie „2. OG rechts“ im Text hinter der Adresse in Klammern; Labor-Nr. in Tabelle 1 ohne Umbruch; Hinweis, wenn der Probenehmer ohne festgelegte Rolle als Sachverständige(r) unterschreibt.'],
   ['1.1.0', '30.10.2026', 'Teil der Spektron-Suite: Spektron-Leiste oben (Projekt, Arbeitsschritte, Weiter), Knopf „📘 Handbuch“ (AidKit-Kapitel „BerichtKit Schritt für Schritt“), Angaben zum Bericht gemeinsam für alle im Projektordner („_Spektron/BerichtKit/_BerichtKit.json“, ältere Projekte „Mitteilungen“), offline nutzbar.'],
   ['1.0.0', '30.10.2026', 'Erste Fassung: Asbest-Untersuchungsbericht (Mitteilung) aus Projektzentrale, LabelKit, ResultKit und FotoKit – Vorschau, Lücken gelb, Word-Datei in „Mitteilungen“.'],
 ];
@@ -215,7 +216,7 @@ async function formStart() {
   const svListe = S.mitarbeiter.filter(p => rolle(p.ordnerKuerzel) === 'sv');
   const sv = P.zustaendig && rolle(P.zustaendig) === 'sv' ? P.zustaendig : (svListe[0] && svListe[0].ordnerKuerzel) || '';
   const vorgabe = { datum: heute(), mitteilung: await naechsteMitteilung(), variante: 'eigen', eingangsdatum: '', auftragsdatum: P.auftragsdatum,
-    agSatz: T.zeilen(P.ag)[0] || '', probenehmer: pn, sv, mt: pn && rolle(pn) === 'mt' ? pn : '', labor: S.cfg.labor || '', einbau: 'unbekannt',
+    agSatz: T.mitArtikel(T.zeilen(P.ag)[0] || '').text, probenehmer: pn, sv, mt: pn && rolle(pn) === 'mt' ? pn : '', labor: S.cfg.labor || '', einbau: 'unbekannt',
     aus: {}, kmf: {}, who: {}, ki: {}, foto: {} };
   S.formKey = key; S.zustand = { text: null, geplant: 0, pruef: 0, berichte: [], offen: new Set() };
   const geteilt = await zustandLesen().catch(e => { S.quellen.push({ ok: false, text: 'Angaben zum Bericht nicht lesbar: ' + (e && e.message || e) }); return null; });
@@ -338,6 +339,10 @@ function render() {
   $('fAuftrag').value = f.auftragsdatum || ''; $('fAuftrag').closest('.feld').hidden = zug;
   $('qAuftrag').textContent = P.auftragsdatum ? (f.auftragsdatum === P.auftragsdatum ? 'aus der Projektzentrale' : `Projektzentrale: ${T.datumDE(P.auftragsdatum)}`) : 'in der Projektzentrale nicht eingetragen';
   $('fAg').value = f.agSatz || '';
+  { const agName = T.zeilen(P.ag)[0] || '', agIstVn = agName && agName.toLowerCase() === (T.zeilen(P.vn)[0] || '').toLowerCase();
+    $('zeileVers').hidden = !P.versicherungsfall; $('fVers').value = f.versicherer || '';
+    $('fVers').placeholder = agIstVn || !agName ? 'bitte eintragen' : agName;
+    $('qVers').textContent = f.versicherer ? 'eigene Angabe (Deckblatt)' : agIstVn ? 'Auftraggeber ist der VN selbst – Versicherer unbekannt' : agName ? 'Auftraggeber aus der Projektzentrale' : 'in der Projektzentrale nicht eingetragen'; }
   $('agInfo').textContent = P.versicherungsfall ? 'Versicherungsfall: Deckblatt mit VN, Risiko, Versicherer und Schaden-Nr.' : 'Direkter Auftrag: Deckblatt mit Auftraggeber, Schadenort und Schaden-Nr.';
   optionen($('fPn'), f.probenehmer, '– bitte wählen –'); $('zeilePn').hidden = zug;
   optionen($('fSv'), f.sv, '– bitte wählen –', k => rolle(k) === 'sv');
@@ -536,6 +541,7 @@ function verbinden() {
   $('fSv').onchange = e => setze('sv', e.target.value);
   $('fMt').onchange = e => setze('mt', e.target.value);
   $('fLabor').onchange = e => setze('labor', e.target.value.trim());
+  $('fVers').onchange = e => setze('versicherer', e.target.value.trim());
   document.querySelectorAll('input[name=variante]').forEach(r => { r.onchange = () => setze('variante', r.value); });
   document.querySelectorAll('input[name=einbau]').forEach(r => { r.onchange = () => setze('einbau', r.value); });
   $('probenListe').addEventListener('change', e => {
