@@ -169,6 +169,16 @@ function versicherungsfallAuto(vn, ag, versicherer) {
   if (istVersicherer(nameVon(ag))) return { ja: true, grund: 'Auftraggeber ist eine Versicherung' };
   return { ja: false, grund: 'VN eingetragen, aber der Auftraggeber ist keine Versicherung' };
 }
+/* Projektnummer „26.0512“ aus einem Text. Das Feld „Projektnummer“ in LabelKit ist Freitext – ältere Projekte tragen dort
+   oft die Adresse mit („26.0512 Stegerwaldstraße Leverkusen“). Gleiche Regel in ResultKit (labelkit.ts) und LabelKit. */
+const projektNummer = v => (s(v).match(/(?<!\d)\d{2}\.\d{3,6}(?!\d)/) || [''])[0];
+/* Gehören zwei Projektangaben zum selben Projekt? Haben beide eine Projektnummer, zählt nur die Nummer;
+   sonst (z. B. „2025-047“, „PAK“) der ganze Text wie bisher. */
+function gleichesProjekt(a, b) {
+  const na = projektNummer(a), nb = projektNummer(b);
+  return na && nb ? na === nb : s(a) === s(b);
+}
+
 function projektSicht(pj, ordner) {
   pj = pj || {};
   const vn = s(pj.versicherungsnehmer), ag = s(pj.auftraggeber), objekt = s(pj.objekt);
@@ -197,7 +207,7 @@ function bericht(eingabe) {
   const offen = offenAlle.map(o => ({ ...o, aus: !!(f.aus && f.aus[o.label] === false) }));
   // LabelKit-Datei eines anderen Projekts: nichts daraus darf in den Bericht
   const lkNr = s(e.lk && e.lk.projekt && e.lk.projekt.nr), nr = s(e.ordner && e.ordner.nr) || P.nr;
-  if (lkNr && nr && lkNr !== nr) sperren.push(`Die LabelKit-Datei gehört zu Projekt ${lkNr}, nicht zu ${nr} – in LabelKit/ResultKit prüfen.`);
+  if (lkNr && nr && !gleichesProjekt(lkNr, nr)) sperren.push(`Die LabelKit-Datei gehört zu Projekt ${lkNr}, nicht zu ${nr} – in LabelKit/ResultKit prüfen.`);
   offen.filter(o => !o.aus).forEach(o => sperren.push(`${o.label}: in LabelKit als Asbestprobe erfasst, aber noch kein Ergebnis in ResultKit – Ergebnis übernehmen oder die Probe unter „Proben“ abwählen.`));
   proben.forEach(p => {
     p.istKmf = f.kmf && p.label in f.kmf ? !!f.kmf[p.label] : (IST_KMF.test(p.material + ' ' + p.matrix) || !!p.kmf.ki || !!p.kmf.who);
@@ -413,7 +423,7 @@ function luecken(m) {
 /** Runs → reiner Text (Lücken in eckigen Klammern) */
 const text = runs => (Array.isArray(runs) ? runs : [runs]).map(r => (r && typeof r === 'object' ? r.gap : String(r == null ? '' : r))).join('');
 
-const API = { VERSION: 1, bericht, istVersicherer, alsEntwurf, beschreibungKey, beschreibungWeichtAb, asbestBefund, kmfWerte, person, rollentext, namensteile, datumDE, zeilen, liste, zahlwort, probenSammeln, projektSicht, text, mitArtikel, objektImSatz };
+const API = { VERSION: 1, bericht, istVersicherer, alsEntwurf, beschreibungKey, beschreibungWeichtAb, asbestBefund, kmfWerte, person, rollentext, namensteile, datumDE, zeilen, liste, zahlwort, probenSammeln, projektSicht, projektNummer, gleichesProjekt, text, mitArtikel, objektImSatz };
 if (typeof module === 'object' && module.exports) module.exports = API;
 root.BerichtText = API;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
