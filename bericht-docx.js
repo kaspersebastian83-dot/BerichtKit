@@ -9,7 +9,7 @@
 function erstellen(D, m, bilder) {
   const { Document, Paragraph, TextRun, ImageRun, Header, Table, TableRow, TableCell, WidthType, BorderStyle, AlignmentType,
     TabStopType, PageNumber, ShadingType, HorizontalPositionRelativeFrom, VerticalPositionRelativeFrom, TextWrappingType,
-    SectionType, VerticalAlign, UnderlineType } = D;
+    SectionType, VerticalAlign, UnderlineType, NoBreakHyphen } = D;
   const FONT = 'Arial';
   const cmPx = cm => cm / 2.54 * 96, cmEmu = cm => Math.round(cm * 360000);
   const LINE15 = { line: 360, lineRule: 'auto' }, LINE1 = { line: 240, lineRule: 'auto' };
@@ -66,20 +66,29 @@ function erstellen(D, m, bilder) {
 
   /* Abschnitte */
   const NONE = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, duenn = { style: BorderStyle.SINGLE, size: 4, color: '808080' };
-  const ueberschrift = text => new Paragraph({ children: [t(text, { underline: { type: UnderlineType.SINGLE } })], spacing: { ...LINE15, before: 240, after: 240 }, keepNext: true, outlineLevel: 0 });
-  const absatz = r => new Paragraph({ children: runs(r), alignment: AlignmentType.JUSTIFIED, spacing: { ...LINE15, after: 240 } });
-  const SPALTEN = [950, 1950, 2270, 1850, 2050];
-  const zelle = (inhalt, w, kopf) => new TableCell({
+  /* Abstände: 1 Leerzeile = 12 pt. Über jeder Überschrift 2 Leerzeilen (24 pt), darunter 1; die erste Überschrift
+     („1. Veranlassung“) beginnt ohne Abstand. Der Abstand steht nur an der Überschrift – der Absatz davor bekommt 0,
+     damit Word und LibreOffice gleich aussehen (sie verrechnen „nach“ + „vor“ unterschiedlich). */
+  const LEER = 240;
+  const ueberschrift = (text, erste) => new Paragraph({ children: [t(text, { underline: { type: UnderlineType.SINGLE } })],
+    spacing: { ...LINE15, before: erste ? 0 : 2 * LEER, after: LEER }, keepNext: true, outlineLevel: 0 });
+  const absatz = (r, nach = LEER) => new Paragraph({ children: runs(r), alignment: AlignmentType.JUSTIFIED, spacing: { ...LINE15, after: nach } });
+  const SPALTEN = [950, 2080, 2240, 1850, 1950];     // Labor-Nr. breit genug für „777-2026-00445679“ in einer Zeile
+  /* Labor-Nr.: geschützte Bindestriche, damit Word die Nummer nicht am Bindestrich umbricht */
+  const ohneUmbruch = (text, o) => [new TextRun({ font: FONT, ...o, children: String(text).split('-').flatMap((x, i) => (i ? [new NoBreakHyphen(), x] : [x])).filter(x => x !== '') })];
+  const zelle = (inhalt, w, kopf, fest) => new TableCell({
     width: { size: w, type: WidthType.DXA }, borders: { top: duenn, bottom: duenn, left: duenn, right: duenn },
     shading: kopf ? { type: ShadingType.CLEAR, fill: 'EDEDED', color: 'auto' } : undefined,
     margins: { top: 60, bottom: 60, left: 90, right: 90 }, verticalAlign: VerticalAlign.CENTER,
-    children: [new Paragraph({ spacing: { ...LINE1, after: 0 }, children: runs(inhalt === '' || inhalt == null ? '–' : inhalt, { size: 20, bold: !!kopf }) })],
+    children: [new Paragraph({ spacing: { ...LINE1, after: 0 }, children: fest && typeof inhalt === 'string' && inhalt.includes('-') ? ohneUmbruch(inhalt, { size: 20 })
+      : runs(inhalt === '' || inhalt == null ? '–' : inhalt, { size: 20, bold: !!kopf }) })],
   });
   const kinder = [];
-  for (const a of m.abschnitte) {
-    kinder.push(ueberschrift(a.titel));
-    for (const x of a.inhalt) {
-      if (x.t === 'p') kinder.push(absatz(x.runs));
+  m.abschnitte.forEach((a, ai) => {
+    kinder.push(ueberschrift(a.titel, ai === 0));
+    a.inhalt.forEach((x, xi) => {
+      const nach = xi === a.inhalt.length - 1 && ai < m.abschnitte.length - 1 ? 0 : LEER;   // vor der nächsten Überschrift
+      if (x.t === 'p') kinder.push(absatz(x.runs, nach));
       else if (x.t === 'fig') {
         const b = bilder.fotos && bilder.fotos[x.label];
         if (b) {
@@ -87,16 +96,16 @@ function erstellen(D, m, bilder) {
           kinder.push(new Paragraph({ children: [new ImageRun({ type: 'jpg', data: b.data, transformation: { width: cmPx(w), height: cmPx(h) },
             altText: { title: x.caption, description: x.caption, name: x.label } })], alignment: AlignmentType.CENTER, keepNext: true, spacing: { before: 120, after: 60 } }));
         } else kinder.push(new Paragraph({ children: [t(`[Foto fehlt: ${x.datei}]`, { highlight: 'yellow' })], alignment: AlignmentType.CENTER, keepNext: true }));
-        kinder.push(new Paragraph({ children: [t(x.caption, { italics: true, size: 22 })], alignment: AlignmentType.CENTER, spacing: { ...LINE15, after: 240 } }));
+        kinder.push(new Paragraph({ children: [t(x.caption, { italics: true, size: 22 })], alignment: AlignmentType.CENTER, spacing: { ...LINE15, after: nach } }));
       } else if (x.t === 'tab') {
         kinder.push(new Paragraph({ children: [t(x.caption, { italics: true, size: 22 })], keepNext: true, spacing: { ...LINE1, after: 120 } }));
         kinder.push(new Table({ width: { size: B, type: WidthType.DXA }, columnWidths: SPALTEN,
           rows: [new TableRow({ tableHeader: true, children: x.kopf.map((k, i) => zelle(k, SPALTEN[i], true)) }),
-            ...x.zeilen.map(z => new TableRow({ cantSplit: true, children: z.map((c, i) => zelle(c, SPALTEN[i], false)) }))] }));
-        kinder.push(new Paragraph({ children: [], spacing: { ...LINE1, after: 240 } }));
+            ...x.zeilen.map(z => new TableRow({ cantSplit: true, children: z.map((c, i) => zelle(c, SPALTEN[i], false, i === 1)) }))] }));
+        kinder.push(new Paragraph({ children: [], spacing: { ...LINE1, after: nach } }));
       }
-    }
-  }
+    });
+  });
 
   /* Ort/Datum, Unterschriften, Anlagen */
   kinder.push(new Paragraph({ children: [t(m.ortDatum)], spacing: { ...LINE15, before: 240, after: 480 }, keepNext: true }));
@@ -105,6 +114,7 @@ function erstellen(D, m, bilder) {
     const b = u.kuerzel && bilder.sig && bilder.sig[u.kuerzel];
     const bild = b ? [new ImageRun({ type: 'png', data: b.data, transformation: { width: cmPx(Math.min(5, SIG_H * b.w / b.h)), height: cmPx(Math.min(5, SIG_H * b.w / b.h) * b.h / b.w) } })] : [];
     return new TableCell({ width: { size: B / 2, type: WidthType.DXA }, borders: { top: NONE, bottom: NONE, left: NONE, right: NONE }, verticalAlign: VerticalAlign.BOTTOM,
+      margins: { left: 0, right: 0 },   // Unterschriftslinie und Text bündig mit dem Textrand
       children: [
         new Paragraph({ children: bild, border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '000000', space: 1 } }, indent: { right: 900 },
           spacing: b ? { ...LINE1, after: 60 } : { before: Math.round(SIG_H / 2.54 * 1440), after: 60 } }),
@@ -116,7 +126,17 @@ function erstellen(D, m, bilder) {
   kinder.push(new Table({ width: { size: B, type: WidthType.DXA }, columnWidths: [B / 2, B / 2],
     borders: { top: NONE, bottom: NONE, left: NONE, right: NONE, insideHorizontal: NONE, insideVertical: NONE },
     rows: [new TableRow({ cantSplit: true, children: sig })] }));
-  m.anlagen.forEach((a, i) => kinder.push(einfach(runs(a), { spacing: { ...LINE1, before: i ? 0 : 960, after: 0 } })));
+  /* Anlagen: „Anlage 1:“ ⇥ Prüfbericht Nr. …  ↵  (Labor) – Folgezeile bündig unter dem Text (hängender Einzug),
+     jede Anlage bleibt zusammen, alle Anlagen bleiben beieinander */
+  const ANL = 1276;                                 // 2,25 cm – reicht auch für „Anlage 10:“
+  const anlagen = m.anlagenTeile || m.anlagen.map(a => ({ label: '', zeilen: [a] }));
+  anlagen.forEach((a, i) => kinder.push(new Paragraph({
+    children: [...(a.label ? [t(a.label), t('\t')] : []), ...runs(a.zeilen[0]),
+      ...a.zeilen.slice(1).flatMap(z => [new TextRun({ font: FONT, break: 1 }), ...runs(z)])],
+    tabStops: [{ type: TabStopType.LEFT, position: ANL }], indent: a.label ? { left: ANL, hanging: ANL } : undefined,
+    keepLines: true, keepNext: i < anlagen.length - 1,
+    spacing: { ...LINE1, before: i ? 0 : 960, after: i < anlagen.length - 1 ? 200 : 0 },
+  })));
 
   const seite = top => ({ size: { width: 11906, height: 16838 }, margin: { top, right: 1418, bottom: 1134, left: 1418, header: 720, footer: 720 } });
   return new Document({

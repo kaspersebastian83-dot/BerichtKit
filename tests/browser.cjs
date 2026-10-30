@@ -74,7 +74,7 @@ const daten = {
     assert.equal(await page.inputValue('#fMitteilung'), '2', 'nächste freie Mitteilung');
     let v = await page.textContent('#vorschau');
     assert.match(v, /Untersuchung auf Asbest und künstliche Mineralfasern \(KMF\)/);
-    assert.match(v, /Am 05\.10\.2026 wurde unser Büro durch Beispiel Versicherung AG beauftragt/);
+    assert.match(v, /Am 05\.10\.2026 wurde unser Büro durch die Beispiel Versicherung AG beauftragt/);
     assert.match(v, /In Probe 1 \(Material: Fliesenkleber\) wurde Asbest nachgewiesen: Chrysotil, 5 - 20 %\./);
     assert.match(v, /Kanzerogenitätsindex von KI = 26 aus/);
     assert.match(v, /Abb\. 1: Fliesenkleber, Umkleide Schwimmbad\./);
@@ -145,15 +145,15 @@ const daten = {
     await page.evaluate(async P => {
       const p = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('Archiv')).getDirectoryHandle(P);
       const fh = await (await (await p.getDirectoryHandle('_Spektron')).getDirectoryHandle('BerichtKit')).getFileHandle('_BerichtKit.json');
-      const d = JSON.parse(await (await fh.getFile()).text()); d.form.agSatz = 'die Beispiel Versicherung AG'; d.geaendertVon = 'KOL';
+      const d = JSON.parse(await (await fh.getFile()).text()); d.form.agSatz = 'die Beispiel Versicherung AG (Regionaldirektion West)'; d.geaendertVon = 'KOL';
       const w = await fh.createWritable(); await w.write(JSON.stringify(d, null, 1)); await w.close();
     }, PROJEKT);
     await page.fill('#fDatum', '2026-10-28'); await page.dispatchEvent('#fDatum', 'change');
     let gemischt = null;
     for (let i = 0; i < 40 && !(gemischt && gemischt.form.datum === '2026-10-28'); i++) { await page.waitForTimeout(150); gemischt = await lesen(); }
     assert.equal(gemischt.form.datum, '2026-10-28', 'eigene Änderung gespeichert');
-    assert.equal(gemischt.form.agSatz, 'die Beispiel Versicherung AG', 'Änderung des Kollegen bleibt');
-    assert.equal(await page.inputValue('#fAg'), 'die Beispiel Versicherung AG', 'und erscheint auch hier');
+    assert.equal(gemischt.form.agSatz, 'die Beispiel Versicherung AG (Regionaldirektion West)', 'Änderung des Kollegen bleibt');
+    assert.equal(await page.inputValue('#fAg'), 'die Beispiel Versicherung AG (Regionaldirektion West)', 'und erscheint auch hier');
     // Spektron-Leiste: BerichtKit ist der eigene Schritt, die anderen Apps sind Links mit demselben Projekt
     await page.waitForSelector('#mosaikLeiste .ml-step.hier');
     assert.match(await page.textContent('#mosaikLeiste .ml-step.hier'), /BerichtKit/);
