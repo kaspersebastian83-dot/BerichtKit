@@ -75,6 +75,15 @@ const daten = {
       await schreib(archiv, p + 'Mitteilungen/99.9001_Raumbuch_2026-10-30.docx', 'PK');
     }, { PROJEKT, daten });
 
+    // Dateien im Projektordner lesen/ändern (wie ein Kollege oder eine andere App)
+    const projektDatei = (pfad, inhalt) => page.evaluate(async ({ P, pfad, inhalt }) => {
+      let d = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('Archiv')).getDirectoryHandle(P);
+      const teile = pfad.split('/'); for (const t of teile.slice(0, -1)) d = await d.getDirectoryHandle(t, { create: inhalt != null });
+      if (inhalt == null) { try { return await (await (await d.getFileHandle(teile.at(-1))).getFile()).text(); } catch (e) { return null; } }
+      const w = await (await d.getFileHandle(teile.at(-1), { create: true })).createWritable(); await w.write(inhalt); await w.close(); return inhalt;
+    }, { P: PROJEKT, pfad, inhalt });
+    const heuteISO = await page.evaluate(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; });
+
     // Öffnen wie aus der Projektzentrale
     await page.goto(url + 'index.html#projekt=' + encodeURIComponent(PROJEKT));
     await page.waitForSelector('#app:not([hidden]) .blatt');
@@ -128,6 +137,24 @@ const daten = {
     await page.waitForFunction(() => !document.querySelector('#anlagenListe li.z-veraltet'));
     assert.ok(await page.isChecked('input[data-anl="bilddoku"]'), 'neue Fassung: wieder vorgehakt');
 
+    // Zurück aus ResultKit („Übernehmen“ mit neuem Wert): Laborwerte beim Fokus neu gelesen, bleibender Hinweis
+    assert.ok(await page.isHidden('#meldungen'));
+    const ergPfad = '_Spektron/ResultKit/_Ergebnisse.json', ergAlt = await projektDatei(ergPfad);
+    await projektDatei(ergPfad, ergAlt.replace('"r":"5 - 20"', '"r":"10 - 50"'));
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.waitForFunction(() => /Chrysotil, 10 - 50 %/.test(document.getElementById('vorschau').textContent));
+    assert.match(await page.textContent('#meldungen'), /Daten neu gelesen \(\d\d:\d\d\): Laborergebnisse \(ResultKit\) – die Vorschau zeigt jetzt den neuen Stand\./);
+    // Ohne Fokus geändert (z. B. zweiter Bildschirm): vor dem Herunterladen neu gelesen, erst ansehen, dann noch einmal klicken
+    await projektDatei(ergPfad, ergAlt);
+    // Statuszeile leeren: „… erst ansehen“ bleibt sonst bis zu 8 s stehen und würde den nächsten Halt vortäuschen
+    const statusLeer = () => page.evaluate(() => { S.statusFest = null; document.getElementById('status').textContent = ''; });
+    await statusLeer(); await page.click('#btnLaden');
+    await page.waitForSelector('#status .warn');
+    assert.match(await page.textContent('#status'), /Die Daten haben sich inzwischen geändert – schau dir die Vorschau an und klick dann noch einmal\./);
+    assert.match(await page.textContent('#meldungen'), /Daten neu gelesen vor dem Speichern|Daten neu gelesen \(/);
+    assert.match(await page.textContent('#vorschau'), /Chrysotil, 5 - 20 %/);
+    await page.click('#btnMeldungenWeg'); assert.ok(await page.isHidden('#meldungen'));
+
     // Einstellungen: Labor und Personen für das Büro speichern
     await page.click('#btnEinstellungen');
     await page.fill('#eLabor', 'Eurofins Beispiel-Labor GmbH');
@@ -175,11 +202,36 @@ const daten = {
     assert.doesNotMatch(await page.textContent('#vorschau'), /KMF/);
     await page.check('input[data-art="aus"][data-l="P2"]');
 
-    // Speichern als 1. Mitteilung → Datei gibt es schon → Abbrechen = „(2)“ – hier: OK = überschreiben
+    // Speichern als 1. Mitteilung → Datei gibt es schon → eigener Dialog mit drei Knöpfen, Abbrechen ist der Standard
     await page.fill('#fMitteilung', '1'); await page.dispatchEvent('#fMitteilung', 'change');
-    await page.click('#btnErstellen');
+    // vorher noch ein geänderter Laborwert: Speichern hält an, die Datei bleibt unberührt
+    await projektDatei(ergPfad, ergAlt.replace('"r":"5 - 20"', '"r":"10 - 50"'));
+    await statusLeer(); await page.click('#btnErstellen');
+    await page.waitForSelector('#status .warn');
+    assert.match(await page.textContent('#meldungen'), /Daten neu gelesen vor dem Speichern \(\d\d:\d\d\): Laborergebnisse \(ResultKit\)/);
+    assert.ok(!(await page.evaluate(() => document.getElementById('dlgErsetzen').open)), 'noch keine Rückfrage');
+    assert.equal(await projektDatei('Mitteilungen/1._Mitteilung_99.9001.docx'), 'alt');
+    // Fokus und Klick fast gleichzeitig (zurück aus ResultKit, gleich auf „Speichern“): auch dann einmal anhalten
+    await projektDatei(ergPfad, ergAlt); await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await statusLeer(); await page.click('#btnErstellen');
+    await page.waitForFunction(() => /Chrysotil, 5 - 20 %/.test(document.getElementById('vorschau').textContent));
+    await page.waitForSelector('#status .warn');
+    assert.ok(!(await page.evaluate(() => document.getElementById('dlgErsetzen').open)), 'erst ansehen');
+    assert.equal(await projektDatei('Mitteilungen/1._Mitteilung_99.9001.docx'), 'alt');
+    const ersetzen = async () => { await page.click('#btnErstellen'); await page.waitForSelector('#dlgErsetzen[open]'); };
+    await ersetzen();
+    assert.match(await page.textContent('#ersText'), /„1\._Mitteilung_99\.9001\.docx“ gibt es schon in „Mitteilungen“\. Was soll passieren\?/);
+    assert.ok(await page.isVisible('#ersErsetzen')); assert.ok(await page.isVisible('#ersDaneben')); assert.ok(await page.isHidden('#ersNaechste'));
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'ersAbbrechen', 'Abbrechen hat den Fokus');
+    await page.keyboard.press('Enter');   // Enter = Abbrechen
+    await page.waitForSelector('#dlgErsetzen', { state: 'hidden' });
+    // „close“ kommt als eigene Aufgabe nach dem Schließen – auf die Statuszeile warten, nicht sofort lesen
+    await page.waitForFunction(() => /Nicht gespeichert – „1\._Mitteilung_99\.9001\.docx“ ist unverändert\./.test(document.getElementById('status').textContent));
+    assert.equal(await projektDatei('Mitteilungen/1._Mitteilung_99.9001.docx'), 'alt', 'Abbrechen speichert nichts');
+    await ersetzen(); await page.keyboard.press('Escape'); await page.waitForSelector('#dlgErsetzen', { state: 'hidden' });
+    assert.equal(await projektDatei('Mitteilungen/1._Mitteilung_99.9001.docx'), 'alt', 'Esc speichert nichts');
+    await ersetzen(); await page.click('#ersErsetzen');
     await page.waitForSelector('#status .ok');
-    assert.ok(dialoge.some(d => /gibt es schon/.test(d)), 'Rückfrage vor dem Überschreiben');
     const b64 = await page.evaluate(async P => {
       const d = await (await (await (await navigator.storage.getDirectory()).getDirectoryHandle('Archiv')).getDirectoryHandle(P)).getDirectoryHandle('Mitteilungen');
       const f = await (await d.getFileHandle('1._Mitteilung_99.9001.docx')).getFile(); const b = new Uint8Array(await f.arrayBuffer());
@@ -195,8 +247,11 @@ const daten = {
       const d = await (await p.getDirectoryHandle('_Spektron')).getDirectoryHandle('BerichtKit');
       return JSON.parse(await (await (await d.getFileHandle('_BerichtKit.json')).getFile()).text());
     }, PROJEKT);
-    assert.equal(zustand.format, 'spektron-bericht'); assert.equal(zustand.projekt, '99.9001');
-    assert.equal(zustand.form.probenehmer, 'Mes'); assert.equal(zustand.form.einbau, 'vor1996');
+    assert.equal(zustand.format, 'spektron-bericht'); assert.equal(zustand.projekt, '99.9001'); assert.equal(zustand.nurEigene, true);
+    assert.equal(zustand.form.probenehmer, 'Mes'); assert.equal(zustand.form.einbau, 'vor1996'); assert.equal(zustand.form.mitteilung, 1);
+    // nur selbst Geändertes: Datum, Variante, Labor (folgt den Einstellungen) und Auftragsdatum werden nicht eingefroren
+    for (const k of ['datum', 'variante', 'labor', 'auftragsdatum', 'agSatz', 'kmf']) assert.ok(!(k in zustand.form), 'nicht in der Datei: ' + k);
+    assert.equal(zustand.berichte[0].mitteilung, 1); assert.equal(zustand.berichte[0].datum, heuteISO);
     assert.deepEqual(zustand.berichte.map(b => b.datei), ['1._Mitteilung_99.9001.docx']);
     assert.deepEqual(zustand.berichte[0].anlagen, ['Laborergebnisse/AR-999-2026-000001-01.pdf', 'Fotos/Bilddokumentation_99.9001_Musterstadt_2026-10-30_Teil_1_von_2.pdf',
       'Fotos/Bilddokumentation_99.9001_Musterstadt_2026-10-30_Teil_2_von_2.pdf', 'Pläne/Probenplan ' + PROJEKT + '.pdf']); assert.equal(zustand.berichte[0].luecken, 0);
@@ -224,6 +279,21 @@ const daten = {
     assert.equal(gemischt.form.datum, '2026-10-28', 'eigene Änderung gespeichert');
     assert.equal(gemischt.form.agSatz, 'die Beispiel Versicherung AG (Regionaldirektion West)', 'Änderung des Kollegen bleibt');
     assert.equal(await page.inputValue('#fAg'), 'die Beispiel Versicherung AG (Regionaldirektion West)', 'und erscheint auch hier');
+    // Noch einmal speichern → „Daneben als (2)“: neue Datei, die vorhandene bleibt
+    await ersetzen(); await page.click('#ersDaneben');
+    await page.waitForFunction(() => /Gespeichert: Mitteilungen\/1\._Mitteilung_99\.9001 \(2\)\.docx/.test(document.getElementById('status').textContent));
+    // Schon beim Büro (Büroaufgabe nennt die Datei): kein „Ersetzen“, stattdessen als nächste Mitteilung
+    await projektDatei('_Spektron/Buero/aufgaben/0b7c1a2e-buero-test.json', JSON.stringify({ format: 'spektron-buerokit', version: 1, typ: 'aufgabe',
+      id: '0b7c1a2e-buero-test', art: 'gutachten', erstellt: '2026-10-30T15:00:00.000Z', projekt: { name: PROJEKT, nr: '99.9001' }, word: 'Mitteilungen/1._Mitteilung_99.9001.docx', empfaenger: [] }));
+    await ersetzen();
+    assert.equal(await page.textContent('#ersTitel'), 'Schon beim Büro');
+    assert.match(await page.textContent('#ersText'), /„1\._Mitteilung_99\.9001\.docx“ ist schon beim Büro \(übergeben am 30\.10\.2026\) – als nächste Mitteilung speichern\?/);
+    assert.ok(await page.isHidden('#ersErsetzen')); assert.equal(await page.textContent('#ersNaechste'), 'Als 2. Mitteilung speichern');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'ersAbbrechen');
+    await page.click('#ersNaechste');
+    await page.waitForFunction(() => /Gespeichert: Mitteilungen\/2\._Mitteilung_99\.9001\.docx/.test(document.getElementById('status').textContent));
+    assert.equal(await page.inputValue('#fMitteilung'), '2');
+    assert.match(await page.textContent('#vorschau'), /\(2\. Mitteilung\)/);
     // Spektron-Leiste: BerichtKit ist der eigene Schritt, die anderen Apps sind Links mit demselben Projekt
     await page.waitForSelector('#mosaikLeiste .ml-step.hier');
     assert.match(await page.textContent('#mosaikLeiste .ml-step.hier'), /BerichtKit/);
@@ -232,9 +302,37 @@ const daten = {
     await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('berichtkit:form:')) localStorage.removeItem(k); });
     await page.reload(); await page.waitForSelector('#app:not([hidden]) .blatt');
     assert.equal(await page.inputValue('#fPn'), 'Mes');
-    assert.equal(await page.inputValue('#fMitteilung'), '1');
+    // 1. und 2. Mitteilung gibt es: vorgeschlagen ist die 3.; das Datum der 2. bleibt nicht stehen
+    assert.equal(await page.inputValue('#fMitteilung'), '3');
+    assert.equal(await page.inputValue('#fDatum'), heuteISO);
+    assert.match(await page.textContent('#meldungen'), /Die 2\. Mitteilung gibt es schon in „Mitteilungen“ – vorgeschlagen ist jetzt die 3\. Mitteilung\./);
+    assert.match(await page.textContent('#meldungen'), /Das Berichtsdatum 28\.10\.2026 gehörte zur 2\. Mitteilung – jetzt steht das heutige Datum da\./);
     assert.match(await page.textContent('#hinweise'), /Angaben zum Bericht aus dem Projektordner/);
+    // Übergang: _BerichtKit.json von BerichtKit 1.6.1 (ganzes Formular, Datum und Nummer vom ersten Bearbeiten eingefroren)
+    const altForm = { datum: '2026-10-01', mitteilung: 1, variante: 'eigen', eingangsdatum: '', auftragsdatum: '2026-10-05', agSatz: 'die Beispiel Versicherung AG',
+      probenehmer: 'Mes', sv: 'Tst', mt: 'Mes', labor: '', einbau: 'vor1996', aus: {}, kmf: {}, who: {}, ki: {}, foto: {} };
+    const bkPfad = '_Spektron/BerichtKit/_BerichtKit.json';
+    const bk = JSON.parse(await projektDatei(bkPfad)); delete bk.nurEigene; bk.form = altForm; bk.berichte = []; bk.geaendertMit = 'BerichtKit 1.6.1';
+    await projektDatei(bkPfad, JSON.stringify(bk, null, 1));
+    await page.reload(); await page.waitForSelector('#app:not([hidden]) .blatt');
+    assert.equal(await page.inputValue('#fDatum'), heuteISO); assert.equal(await page.inputValue('#fMitteilung'), '3');
+    assert.equal(await page.inputValue('#fLabor'), 'Eurofins Beispiel-Labor GmbH', 'leeres Labor war eingefroren – jetzt aus den Einstellungen');
+    assert.match(await page.textContent('#meldungen'), /Berichtsdatum war seit dem ersten Bearbeiten auf dem 01\.10\.2026 stehen geblieben/);
+    assert.match(await page.textContent('#meldungen'), /weicht von den Projektdaten ab: Probenahme durch, Zweite Unterschrift – bitte prüfen\./);
+    let neuGeschrieben = null;
+    for (let i = 0; i < 40 && !(neuGeschrieben && neuGeschrieben.nurEigene); i++) { await page.waitForTimeout(150); neuGeschrieben = JSON.parse(await projektDatei(bkPfad)); }
+    // Vorgaben und Leeres fallen weg; was von der heutigen Vorgabe abweicht (Probenehmer, zweite Unterschrift), bleibt als eigene Angabe
+    assert.deepEqual(neuGeschrieben.form, { einbau: 'vor1996', probenehmer: 'Mes', mt: 'Mes' }, 'nur noch eigene Angaben in der Datei');
     assert.deepEqual(fehler, [], 'keine Fehler in der Konsole');
     console.log('ok – BerichtKit im Browser: öffnen, Vorschau, Einstellungen, Word-Datei in „Mitteilungen“, Angaben im Projektordner, Spektron-Leiste');
-  } catch (e) { console.log('DIALOGE', dialoge, 'FEHLER', fehler); throw e; } finally { await browser.close(); server.close(); }
-})().catch(e => { console.error(e); process.exit(1); });
+  } catch (e) {
+    console.log('DIALOGE', dialoge, 'FEHLER', fehler);
+    if (process.env.GITHUB_ACTIONS) console.log('::error title=Browsertest Seite::' + (`Status: ${await page.textContent('#status').catch(() => '?')} | Meldungen: ${await page.textContent('#meldungen').catch(() => '?')} | Fehler: ${fehler.join(' / ')} | Dialoge: ${dialoge.join(' / ')}`).slice(0, 1500).replace(/%/g, '%25').replace(/\r?\n/g, '%0A'));
+    throw e;
+  } finally { await browser.close(); server.close(); }
+})().catch(e => {
+  console.error(e);
+  // In GitHub Actions: Grund als Annotation – sichtbar in der Prüfungsübersicht, auch ohne das ganze Protokoll
+  if (process.env.GITHUB_ACTIONS) console.log('::error title=Browsertest::' + String(e && (e.stack || e.message) || e).slice(0, 1500).replace(/%/g, '%25').replace(/\r?\n/g, '%0A'));
+  process.exit(1);
+});
