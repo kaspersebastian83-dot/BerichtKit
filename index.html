@@ -63,6 +63,18 @@ table.proben tr.aus td{opacity:.45}
 .unter label{display:flex;gap:4px;align-items:center}
 .unter input[type=text]{width:70px;padding:1px 6px}
 .unter select{width:auto;max-width:210px;padding:1px 6px;font-size:12px}
+ul.anlagen{list-style:none;margin:0;padding:0;font-size:13px}
+ul.anlagen li.anl{border-bottom:1px solid var(--line);padding:6px 0}
+ul.anlagen li.anl label{display:flex;gap:8px;align-items:center}
+ul.anlagen li.anl .nr{font-weight:600;min-width:66px;white-space:nowrap}
+ul.anlagen li.anl.aus .nr,ul.anlagen li.anl.z-fehlt label{color:var(--muted)}
+ul.anlagen li.anl > .klein{margin-left:24px;overflow-wrap:anywhere}
+ul.anlagen li.anl input[type=text]{flex:1;padding:2px 7px}
+ul.anlagen li.anl-kopf{font-size:11.5px;color:var(--muted);font-weight:600;padding:10px 0 2px}
+ul.anlagen .marke{border-radius:4px;padding:0 6px;font-size:11.5px;white-space:nowrap}
+ul.anlagen .marke.veraltet,ul.anlagen .marke.unvollstaendig{background:var(--gap);color:#6b4b00}
+ul.anlagen .marke.unbekannt,ul.anlagen .marke.fehlt{background:var(--panel2);border:1px solid var(--line);color:var(--muted)}
+ul.anlagen a{color:var(--accent);white-space:nowrap}
 ul.hinweise{margin:0;padding-left:18px;font-size:13px}
 ul.hinweise li.sperre{color:var(--err);font-weight:600}
 .feld .quelle .annahme{background:var(--gap);border-radius:4px;padding:0 4px;color:var(--ink,#222)}
@@ -163,6 +175,11 @@ dialog .knoepfe{display:flex;justify-content:flex-end;gap:8px;padding:12px 22px;
       </div>
     </div>
     <div class="karte">
+      <h2>Anlagen <span class="klein" style="text-transform:none" id="anlagenInfo"></span></h2>
+      <ul class="anlagen" id="anlagenListe"></ul>
+      <p style="margin:8px 0 0"><button type="button" id="btnAnlageDazu" title="Weitere Datei aus dem Projektordner als Anlage – z. B. Messprotokoll, Fremdgutachten">+ Weitere Datei …</button></p>
+    </div>
+    <div class="karte">
       <h2>Personen</h2>
       <div class="feld" id="zeilePn"><label for="fPn">Probenahme durch</label><select id="fPn"></select><span class="quelle"><span id="qPn"></span> <button type="button" class="klein-knopf" id="btnPnOk" hidden title="Auswahl stimmt – Hinweis ausblenden">✓ stimmt</button></span></div>
       <div class="feld"><label for="fSv">Unterschrift</label><div class="paar"><select id="fSv"></select><select id="fR1" aria-label="Unterschrift als"><option value="sv">als Sachverständige(r)</option><option value="mt">als Messtechniker(in)</option></select></div></div>
@@ -198,6 +215,7 @@ dialog .knoepfe{display:flex;justify-content:flex-end;gap:8px;padding:12px 22px;
 
 <script src="vendor/docx.iife.js"></script>
 <script src="spektron-ordner.js"></script>
+<script src="anlagen.js"></script>
 <script src="bericht-text.js"></script>
 <script src="bericht-docx.js"></script>
 <script src="mosaik-leiste.js"></script>
