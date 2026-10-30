@@ -132,6 +132,72 @@ fall('Artikel für den Auftraggeber, Objekt im Satz', () => {
   assert.equal(T.objektImSatz('Musterweg 12, 12345 Musterstadt'), 'Musterweg 12, 12345 Musterstadt');
 });
 
+fall('Versicherer: Projektzentrale vor Annahme aus dem Auftraggeber', () => {
+  const basis = { lk: D.lk([[1, '2026-10-16', 'Keller', 'Putz', 'Sonstige']]), erg: D.erg([[1, 'kein']]), cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form() };
+  let m = T.bericht({ ...basis, pj: D.pj({ versicherer: 'Muster Assekuranz AG' }) });
+  assert.deepEqual(m.deckblatt.felder[2], ['Versicherer:', ['Muster Assekuranz AG']]);
+  assert.ok(!m.hinweise.some(h => /Versicherer angenommen/.test(h)));
+  m = T.bericht({ ...basis, pj: D.pj() });
+  assert.deepEqual(m.deckblatt.felder[2], ['Versicherer:', ['Beispiel Versicherung AG']]);
+  assert.ok(m.hinweise.some(h => /Versicherer angenommen: Auftraggeber „Beispiel Versicherung AG“/.test(h)));
+});
+
+fall('Probenehmer: genauer Feldbogen-Treffer, eigene Auswahl, sonst „angenommen“', () => {
+  const basis = { pj: D.pj(), lk: D.lk([[1, '2026-10-16', 'Keller', 'Putz', 'Sonstige']]), erg: D.erg([[1, 'kein']]), cfg: D.cfg, mitarbeiter: D.mitarbeiter };
+  let q = T.bericht({ ...basis, feldbogen: { text: 'Max Messer', kuerzel: 'Mes' }, form: form() }).probenehmerQuelle;
+  assert.equal(q.angenommen, false); assert.match(q.text, /Feldbogen.*Max Messer/);
+  q = T.bericht({ ...basis, feldbogen: { text: 'M. Messer', kuerzel: '' }, form: form({ probenehmer: 'Tst' }) }).probenehmerQuelle;
+  assert.equal(q.angenommen, true); assert.match(q.text, /Dr\. Tanja Test angenommen \(zuständig laut Ordner; Feldbogen „M\. Messer“ passt zu keinem Namen/);
+  q = T.bericht({ ...basis, feldbogen: { text: 'Max Messer', kuerzel: 'Mes' }, form: form({ probenehmer: 'Tst' }) }).probenehmerQuelle;
+  assert.equal(q.angenommen, true, 'Auswahl weicht vom Feldbogen ab');
+  q = T.bericht({ ...basis, form: form({ probenehmer: 'Tst', pnQuelle: 'hand' }) }).probenehmerQuelle;
+  assert.deepEqual(q, { angenommen: false, text: 'eigene Auswahl' });
+  assert.equal(T.bericht({ ...basis, form: form({ variante: 'zugestellt' }) }).probenehmerQuelle, null);
+});
+
+fall('Entnahmestelle LabelKit ↔ Prüfbericht: gleich, abweichend, nicht abgleichbar (vorerst nur Hinweis)', () => {
+  const lk = D.lk([[1, '2026-10-16', 'EG Küche', 'Fliesenkleber', 'Sonstige'], [2, '2026-10-16', 'EG Flur', 'Putz', 'Sonstige']]);
+  const e = () => D.auftrag(D.erg([[1, 'chrysotil'], [2, 'kein']]), [[1, 'EG Küche, Fliesenkleber, fest gebunden'], [2, 'EG Flur, Putz – Decke']]);
+  let m = T.bericht({ pj: D.pj(), lk, erg: D.berichtDesc(e(), { P1: 'EG  küche, Fliesenkleber, fest gebunden', P2: 'EG Flur, Putz - Decke' }), cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form() });
+  assert.deepEqual(m.proben.map(p => p.abgleich.ok), [true, true], 'Leerraum, Groß-/Kleinschreibung, Striche zählen nicht');
+  assert.ok(!m.hinweise.some(h => /Entnahmestelle/.test(h)));
+  m = T.bericht({ pj: D.pj(), lk, erg: D.berichtDesc(e(), { P1: 'EG Küche, Fliesenkleber, fest gebunden', P2: 'EG Bad, Putz – Decke' }), cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form() });
+  assert.ok(m.hinweise.includes('Probe 2: Entnahmestelle passt nicht – LabelKit „EG Flur, Putz – Decke“, Prüfbericht AR-999-2026-000001-01 „EG Bad, Putz – Decke“ → in LabelKit oder beim Labor klären.'));
+  assert.deepEqual(m.sperren, [], 'noch keine Sperre');
+  m = T.bericht({ pj: D.pj(), lk, erg: D.erg([[1, 'chrysotil'], [2, 'kein']]), cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form() });
+  assert.ok(m.hinweise.some(h => /Entnahmestelle nicht mit dem Prüfbericht abgeglichen \(P1, P2\): ResultKit hat den LabelKit-Auftrag nicht gespeichert/.test(h)));
+  assert.equal(T.beschreibungWeichtAb('A, Tiefe: 2 cm', 'a'), false); assert.equal(T.beschreibungWeichtAb('', 'x'), false);
+});
+
+fall('Sperren: fremde LabelKit-Datei, LabelKit-Probe ohne Ergebnis (abwählbar); Entwurf zum Herunterladen', () => {
+  const basis = { pj: D.pj(), erg: D.erg([[1, 'kein']]), cfg: D.cfg, mitarbeiter: D.mitarbeiter };
+  const lk2 = D.lk([[1, '2026-10-16', 'Keller', 'Putz', 'Sonstige'], [2, '2026-10-16', 'Dach', 'Wellplatte', 'Sonstige']]);
+  let m = T.bericht({ ...basis, lk: lk2, form: form() });
+  assert.deepEqual(m.sperren, ['P2: in LabelKit als Asbestprobe erfasst, aber noch kein Ergebnis in ResultKit – Ergebnis übernehmen oder die Probe unter „Proben“ abwählen.']);
+  assert.deepEqual(m.offen.map(o => [o.label, o.material, o.aus]), [['P2', 'Wellplatte', false]]);
+  m = T.bericht({ ...basis, lk: lk2, form: form({ aus: { P2: false } }) });
+  assert.deepEqual(m.sperren, []); assert.equal(m.offen[0].aus, true);
+  const fremd = { ...D.lk([[1, '2026-10-16', 'Keller', 'Putz', 'Sonstige']]), projekt: { nr: '99.9002' } };
+  m = T.bericht({ ...basis, lk: fremd, ordner: { nr: '99.9001' }, form: form() });
+  assert.deepEqual(m.sperren, ['Die LabelKit-Datei gehört zu Projekt 99.9002, nicht zu 99.9001 – in LabelKit/ResultKit prüfen.']);
+  const ent = T.alsEntwurf(m);
+  assert.equal(ent.dateiname, '1._Mitteilung_99.9001_ENTWURF.docx');
+  assert.deepEqual(ent.kennzeilen, [{ art: 'entwurf', text: 'ENTWURF – nicht versenden' }]);
+  assert.equal(m.dateiname, '1._Mitteilung_99.9001.docx', 'Modell selbst unverändert');
+});
+
+fall('Vorläufiger Prüfbericht: Hinweis und Kopfzeile, keine Sperre; Anlagen-PDFs für die Übergabe', () => {
+  const e = D.erg([[1, 'chrysotil']]); e.berichte[0].vorlaeufig = true;
+  const m = T.bericht({ pj: D.pj(), lk: D.lk([[1, '2026-10-16', 'Keller', 'Putz', 'Sonstige']]), erg: e, cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form() });
+  assert.deepEqual(m.sperren, []);
+  assert.deepEqual(m.kennzeilen.map(k => k.art), ['vorlaeufig']);
+  assert.equal(m.hinweise.filter(h => /ist vorläufig/.test(h)).length, 1);
+  assert.deepEqual(m.anlagenDateien, ['Laborergebnisse/AR-999-2026-000001-01.pdf']);
+  delete e.berichte[0].sources.pdf;
+  const ohne = T.bericht({ pj: D.pj(), lk: D.lk([[1, '2026-10-16', 'Keller', 'Putz', 'Sonstige']]), erg: e, cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form() });
+  assert.deepEqual(ohne.anlagenDateien, []); assert.ok(ohne.hinweise.some(h => /PDF nicht in „Laborergebnisse“/.test(h)));
+});
+
 fall('Einzelteile: Befund, Namen, Zahlwörter', () => {
   assert.deepEqual(T.asbestBefund(D.werte.chrysotil), { text: 'Chrysotil, 5 - 20 %', gefunden: true, eindeutig: true });
   assert.deepEqual(T.asbestBefund(D.werte.kein), { text: 'Kein Asbest nachgewiesen', gefunden: false, eindeutig: true });

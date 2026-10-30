@@ -28,6 +28,22 @@ const nameVon = v => zeilen(v)[0] || '';
 const PNR = v => { const m = /(\d+)\s*$/.exec(s(v)); return m ? +m[1] : null; };
 const gleicherName = (a, b) => !!a && a.toLowerCase().replace(/\s+/g, ' ') === s(b).toLowerCase().replace(/\s+/g, ' ');
 
+/* ---------- Entnahmestelle: LabelKit ↔ Prüfbericht (Regel wie ResultKit src/ergebnisse.ts) ---------- */
+const tidy = v => String(v == null ? '' : v).normalize('NFC').replace(/\s+/g, ' ').trim();
+/** Probenbeschreibung vergleichbar machen. Eurofins übernimmt den Text der LabelKit-Laborübergabe wörtlich (geprüft an 15 echten
+    Asbestproben, 30.10.2026 – sogar Tippfehler bleiben stehen); angeglichen werden nur Leerraum, Groß-/Kleinschreibung, Striche
+    und Anführungszeichen. In ResultKit (src/ergebnisse.ts) gleich halten. */
+const beschreibungKey = v => tidy(v).toLowerCase().replace(/[\u2010-\u2015\u2212]/g, '-').replace(/[\u201E\u201C\u201D\u201A\u2018\u2019\u00AB\u00BB"']/g, '"');
+/** Weicht die Beschreibung im Prüfbericht von der aus LabelKit ab? Nie bei fehlendem Text und bei Bohrkernen (andere Reihenfolge
+    in der Übergabe); „Tiefe: …“ am Ende zählt nicht (LabelKit übergibt sie nur bei Bohrmehl). */
+function beschreibungWeichtAb(auftrag, bericht, art = '') {
+  if (!tidy(auftrag) || !tidy(bericht) || /bohrkern/i.test(art)) return false;
+  const a = beschreibungKey(auftrag), b = beschreibungKey(bericht);
+  return a !== b && a.replace(/, tiefe: [^,]*$/, '') !== b;
+}
+/** Abweichende Entnahmestelle sperrt das Speichern noch nicht – erst nach dem Gegentest mit echten Projekten auf true setzen. */
+const ABGLEICH_SPERRT = false;
+
 /* ---------- Auftraggeber und Objekt im Fließtext ---------- */
 /** Auftraggeber mit Artikel für „… durch <X> beauftragt / zugestellt“ (Akkusativ). Unbekannt → unverändert, artikel:false. */
 const SCHON_MIT = /^(?:die|der|den|das|dem|des|Herrn|Frau|Firma|Fa\.|Familie|Eheleute)\s/i;
@@ -114,23 +130,29 @@ function labelkitAsbest(lk) {
   }
   return m;
 }
-/** Alle Proben mit Asbest- oder KMF-Ergebnis aus _Ergebnisse.json, angereichert mit LabelKit. */
+/** Alle Proben mit Asbest- oder KMF-Ergebnis aus _Ergebnisse.json, angereichert mit LabelKit.
+    abgleich: Beschreibung aus dem LabelKit-Auftrag (auftrag.proben[].desc, wie ResultKit ihn übernommen hat) gegen die aus dem
+    Prüfbericht (berichte[].proben[].desc) – ok: true/false, null = nicht abgleichbar (kein Auftrag oder kein Text).
+    offen: LabelKit-Asbestproben ohne Ergebnis. */
 function probenSammeln(erg, lk) {
   const lkm = labelkitAsbest(lk), out = [], gesehen = new Set();
   const berichte = erg && Array.isArray(erg.berichte) ? erg.berichte : [];
+  const auftrag = erg && erg.auftrag && Array.isArray(erg.auftrag.proben) ? new Map(erg.auftrag.proben.filter(a => a && a.label).map(a => [s(a.label), a])) : null;
   for (const b of berichte) for (const p of (b.proben || [])) {
     const werte = p.werte || [];
     const befund = asbestBefund(werte), kmf = kmfWerte(werte);
     if (!(p.typ === 'Asbest' || befund || kmf.ki || kmf.who)) continue;
     const label = s(p.label) || (PNR(p.ref) ? 'P' + PNR(p.ref) : s(p.ref));
     if (gesehen.has(label + '|' + b.bericht)) continue; gesehen.add(label + '|' + b.bericht);
-    const l = lkm.get(label) || {};
+    const l = lkm.get(label) || {}, a = auftrag && auftrag.get(label);
+    const abgleich = { labelkit: a ? tidy(a.desc) : '', bericht: tidy(p.desc), auftrag: !!auftrag };
+    abgleich.ok = abgleich.labelkit && abgleich.bericht ? !beschreibungWeichtAb(a.desc, p.desc, s(p.art)) : null;
     out.push({ label, nr: l.nr || PNR(p.ref) || PNR(label), ref: s(p.ref), labNr: s(p.labNr), bericht: s(b.bericht || p.bericht),
       stelle: l.stelle || s(p.raum) || '', material: l.material || '', matrix: l.matrix || s(p.art),
-      datum: l.datum || s(p.datum), befund, kmf, vorlaeufig: !!b.vorlaeufig });
+      datum: l.datum || s(p.datum), befund, kmf, vorlaeufig: !!b.vorlaeufig, abgleich });
   }
   out.sort((a, b) => (a.nr || 0) - (b.nr || 0));
-  const offen = [...lkm.keys()].filter(k => !out.some(p => p.label === k));
+  const offen = [...lkm].filter(([k]) => !out.some(p => p.label === k)).map(([label, l]) => ({ label, nr: l.nr, stelle: l.stelle, material: l.material }));
   return { proben: out, offen };
 }
 
@@ -139,37 +161,48 @@ function projektSicht(pj, ordner) {
   pj = pj || {};
   const vn = s(pj.versicherungsnehmer), ag = s(pj.auftraggeber), objekt = s(pj.objekt);
   const versicherungsfall = !!vn;
-  return { nr: s(pj.projektnummer) || s(ordner && ordner.nr), versicherungsfall, vn, ag, objekt,
+  return { nr: s(pj.projektnummer) || s(ordner && ordner.nr), versicherungsfall, vn, ag, objekt, versicherer: s(pj.versicherer),
     schadennummer: s(pj.schadennummer), auftragsdatum: s(pj.auftragsdatum), zustaendig: s(pj.zustaendig && pj.zustaendig.kuerzel) || s(ordner && ordner.kuerzel),
     sachverstaendiger: s(pj.sachverstaendiger) };
 }
 
 /* ---------- Berichtsmodell ----------
    eingabe = { pj, ordner:{name,nr,kuerzel}, lk, erg, cfg, mitarbeiter, fotos:{label:[{datei,...}]},
-               form:{ datum, mitteilung, variante:'eigen'|'zugestellt', eingangsdatum, auftragsdatum, agSatz,
-                      probenahmedatum, probenehmer, sv, mt, labor, aus:{label:false}, kmf:{label:true}, who:{label:true},
-                      ki:{label:'25'}, foto:{label:'datei'|''}, einbau:'vor1996'|'unbekannt' } }
-   Ergebnis: { dateiname, deckblatt, kopf, abschnitte, unterschriften, anlagen, luecken[], hinweise[] } */
+               feldbogen:{ text, kuerzel } (Probenehmer laut LabelKit-Feldbogen, kuerzel nur bei genauem Treffer),
+               form:{ datum, mitteilung, variante:'eigen'|'zugestellt', eingangsdatum, auftragsdatum, agSatz, versicherer,
+                      probenahmedatum, probenehmer, pnQuelle:'hand'|undefined, sv, mt, labor, aus:{label:false}, kmf:{label:true},
+                      who:{label:true}, ki:{label:'25'}, foto:{label:'datei'|''}, einbau:'vor1996'|'unbekannt' } }
+   Ergebnis: { dateiname, deckblatt, kopf, kennzeilen[], abschnitte, unterschriften, anlagen, anlagenDateien[], luecken[], hinweise[],
+               sperren[], probenehmerQuelle, offen[] }
+   sperren: Die Daten passen nicht zusammen – dann nicht in „Mitteilungen“ speichern, nur als Entwurf herunterladen (alsEntwurf).
+   Lücken sperren nicht: Die füllt der SV in Word aus; ob welche übrig sind, prüft die Übergabe ans Büro. */
 function bericht(eingabe) {
   const e = eingabe || {}, f = e.form || {}, P = projektSicht(e.pj, e.ordner);
-  const hinweise = [];
-  const { proben: alle, offen } = probenSammeln(e.erg, e.lk);
+  const hinweise = [], sperren = [];
+  const { proben: alle, offen: offenAlle } = probenSammeln(e.erg, e.lk);
   const proben = alle.filter(p => !(f.aus && f.aus[p.label] === false));
+  const offen = offenAlle.map(o => ({ ...o, aus: !!(f.aus && f.aus[o.label] === false) }));
+  // LabelKit-Datei eines anderen Projekts: nichts daraus darf in den Bericht
+  const lkNr = s(e.lk && e.lk.projekt && e.lk.projekt.nr), nr = s(e.ordner && e.ordner.nr) || P.nr;
+  if (lkNr && nr && lkNr !== nr) sperren.push(`Die LabelKit-Datei gehört zu Projekt ${lkNr}, nicht zu ${nr} – in LabelKit/ResultKit prüfen.`);
+  offen.filter(o => !o.aus).forEach(o => sperren.push(`${o.label}: in LabelKit als Asbestprobe erfasst, aber noch kein Ergebnis in ResultKit – Ergebnis übernehmen oder die Probe unter „Proben“ abwählen.`));
   proben.forEach(p => {
     p.istKmf = f.kmf && p.label in f.kmf ? !!f.kmf[p.label] : (IST_KMF.test(p.material + ' ' + p.matrix) || !!p.kmf.ki || !!p.kmf.who);
     p.ki = p.kmf.ki || s(f.ki && f.ki[p.label]);
     p.kiQuelle = p.kmf.ki ? 'labor' : (p.ki ? 'hand' : '');
     p.whoNachgewiesen = f.who && p.label in f.who ? !!f.who[p.label] : !!p.kmf.whoPositiv;
     p.foto = f.foto && p.label in f.foto ? f.foto[p.label] : ((e.fotos && e.fotos[p.label] && e.fotos[p.label][0] && e.fotos[p.label][0].datei) || '');
-    if (p.vorlaeufig) hinweise.push(`${p.ref || p.label}: Prüfbericht ${p.bericht} ist vorläufig.`);
+    if (p.vorlaeufig) hinweise.push(`Prüfbericht ${p.bericht} ist vorläufig – der Bericht bekommt die Kopfzeile „Vorläufig“.`);
+    if (p.abgleich.ok === false) (ABGLEICH_SPERRT ? sperren : hinweise).push(`${p.ref || p.label}: Entnahmestelle passt nicht – LabelKit „${p.abgleich.labelkit}“, Prüfbericht ${p.bericht} „${p.abgleich.bericht}“ → in LabelKit oder beim Labor klären.`);
     if (p.befund && !p.befund.eindeutig) hinweise.push(`${p.ref || p.label}: Ergebnis „${p.befund.text}“ nicht eindeutig – bitte im Prüfbericht prüfen.`);
     if (!p.material) hinweise.push(`${p.ref || p.label}: Material fehlt (LabelKit „Bauteil / Material“).`);
     if (p.istKmf && !p.ki) hinweise.push(`${p.ref || p.label}: KI-Wert fehlt in den Labordaten – bitte aus dem Prüfbericht eintragen.`);
   });
-  offen.forEach(l => hinweise.push(`${l}: in LabelKit als Asbestprobe erfasst, aber noch kein Ergebnis in ResultKit.`));
+  const ohneAbgleich = proben.filter(p => p.abgleich.ok === null);
+  if (ohneAbgleich.length) hinweise.push(`Entnahmestelle nicht mit dem Prüfbericht abgeglichen (${ohneAbgleich.map(p => p.label).join(', ')}): `
+    + (ohneAbgleich.some(p => !p.abgleich.auftrag) ? 'ResultKit hat den LabelKit-Auftrag nicht gespeichert – in ResultKit die Ergebnisse erneut übernehmen.' : 'Beschreibung fehlt (z. B. nur PDF) – bitte selbst vergleichen.'));
   if (!proben.length) hinweise.push('Keine Asbestergebnisse gefunden – zuerst in ResultKit die Laborergebnisse übernehmen.');
 
-  const zugestellt = f.variante === 'zugestellt';
   const n = proben.length, eine = n === 1;
   const kmfProben = proben.filter(p => p.istKmf);
   const pos = proben.filter(p => p.befund && p.befund.gefunden);
@@ -180,8 +213,10 @@ function bericht(eingabe) {
   const datum = datumDE(f.datum);
   const mitteilung = `${+f.mitteilung || 1}. Mitteilung`;
 
+  const zugestellt = f.variante === 'zugestellt';
   // Personen
   const pn = person(e.cfg, e.mitarbeiter, f.probenehmer), sv = person(e.cfg, e.mitarbeiter, f.sv);
+  const probenehmerQuelle = pnQuelle(f, e.feldbogen, zugestellt, pn, P.zustaendig);
   const mt = zugestellt ? null : person(e.cfg, e.mitarbeiter, f.mt);
 
   // Betreff
@@ -192,11 +227,14 @@ function bericht(eingabe) {
 
   // Deckblatt-Feldblock
   const felder = [];
-  // Versicherer: Eingabe, sonst Auftraggeber aus der Projektzentrale (dort steht im Versicherungsfall die Versicherung) –
-  // aber nicht, wenn der Auftraggeber der VN selbst ist (dann ist der Versicherer unbekannt → Lücke statt falscher Angabe).
+  // Versicherer: Eingabe, dann Feld „Versicherer“ der Projektzentrale, sonst angenommen: Auftraggeber (der Arbeitszettel-Import
+  // schreibt im Versicherungsfall die Versicherung dorthin) – aber nicht, wenn der Auftraggeber der VN selbst ist (→ Lücke).
   const agIstVn = P.versicherungsfall && gleicherName(nameVon(P.ag), nameVon(P.vn));
-  const versicherer = s(f.versicherer) || (agIstVn ? '' : nameVon(P.ag));
-  if (P.versicherungsfall && agIstVn && !s(f.versicherer)) hinweise.push('Auftraggeber und VN sind gleich – Versicherer bitte unter „Versicherer“ eintragen.');
+  const versicherer = s(f.versicherer) || nameVon(P.versicherer) || (agIstVn ? '' : nameVon(P.ag));
+  if (P.versicherungsfall && !s(f.versicherer) && !P.versicherer) {
+    if (agIstVn) hinweise.push('Auftraggeber und VN sind gleich – Versicherer bitte unter „Versicherer“ eintragen.');
+    else if (versicherer) hinweise.push(`Versicherer angenommen: Auftraggeber „${versicherer}“ – bitte prüfen (in der Projektzentrale „Versicherer“ eintragen).`);
+  }
   if (P.versicherungsfall) {
     felder.push(['VN:', zeilen(P.vn)], ['Risiko:', zeilen(P.objekt)], ['Versicherer:', [versicherer].filter(Boolean)]);
   } else {
@@ -311,6 +349,13 @@ function bericht(eingabe) {
   const anlagenTeile = (berichtNr.length ? berichtNr : ['']).map((nr, i) =>
     ({ label: `Anlage ${i + 1}:`, zeilen: [['Prüfbericht Nr. ', L(nr, 'Prüfbericht-Nr.')], ['(', L(labor, 'Labor'), ')']] }));
   const anlagen = anlagenTeile.map(a => [a.label + ' ', ...a.zeilen[0], ' ', ...a.zeilen[1]]);
+  // Prüfbericht-PDFs für die Übergabe ans Büro (liegen immer sichtbar in „Laborergebnisse“)
+  const ergBerichte = e.erg && Array.isArray(e.erg.berichte) ? e.erg.berichte : [], anlagenDateien = [];
+  berichtNr.forEach(nr => {
+    const b = ergBerichte.find(x => s(x.bericht) === nr), pdf = b && b.sources && s(b.sources.pdf);
+    if (pdf) anlagenDateien.push('Laborergebnisse/' + pdf); else hinweise.push(`Prüfbericht ${nr}: PDF nicht in „Laborergebnisse“ – für die Anlage bitte ablegen.`);
+  });
+  const kennzeilen = proben.some(p => p.vorlaeufig) ? [{ art: 'vorlaeufig', text: 'Vorläufig – beruht auf einem vorläufigen Prüfbericht' }] : [];
 
   const abschnitte = [
     { titel: '1. Veranlassung', inhalt: v },
@@ -321,10 +366,26 @@ function bericht(eingabe) {
   const modell = {
     dateiname: `${+f.mitteilung || 1}._Mitteilung_${P.nr || 'Projekt'}.docx`,
     deckblatt: { titel: `Untersuchungsbericht vom ${datum}`, mitteilung, projektnummer: P.nr, betreff: betreffRuns, felder },
-    kopf, abschnitte, ortDatum: `Würselen, ${datum}`, unterschriften, anlagen, anlagenTeile, proben, hinweise,
+    kopf, kennzeilen, abschnitte, ortDatum: `Würselen, ${datum}`, unterschriften, anlagen, anlagenTeile, anlagenDateien, proben, offen,
+    hinweise: [...new Set(hinweise)], sperren, probenehmerQuelle,
   };
   modell.luecken = luecken(modell);
   return modell;
+}
+/** Probenehmer: Es zählt nur ein genauer Treffer aus dem Feldbogen (LabelKit schlägt die Namen der Mitarbeiterliste vor) oder die
+    eigene Auswahl. Alles andere – meist der Zuständige laut Ordnername – ist eine Annahme und wird angezeigt. */
+function pnQuelle(f, fb, zugestellt, pn, zustaendig) {
+  if (zugestellt || !pn) return null;
+  const text = s(fb && fb.text), k = s(fb && fb.kuerzel), gewaehlt = s(f.probenehmer);
+  if (k && k === gewaehlt) return { angenommen: false, text: `aus dem Feldbogen (LabelKit): „${text}“` };
+  if (f.pnQuelle === 'hand') return { angenommen: false, text: 'eigene Auswahl' + (text ? ` – Feldbogen: „${text}“` : '') };
+  const grund = k ? `Feldbogen nennt „${text}“` : text ? `Feldbogen „${text}“ passt zu keinem Namen der Mitarbeiterliste`
+    : 'kein Probenehmer im Feldbogen';
+  return { angenommen: true, text: `Probenehmer ${pn.name} angenommen (${gewaehlt === zustaendig ? 'zuständig laut Ordner' : 'nicht aus dem Feldbogen'}; ${grund}) – bitte prüfen.` };
+}
+/** Fassung zum Herunterladen, wenn das Speichern gesperrt ist: Kopfzeile „ENTWURF“ und „_ENTWURF“ im Dateinamen. */
+function alsEntwurf(m) {
+  return { ...m, dateiname: m.dateiname.replace(/\.docx$/i, '_ENTWURF.docx'), kennzeilen: [{ art: 'entwurf', text: 'ENTWURF – nicht versenden' }, ...(m.kennzeilen || [])] };
 }
 /** Alle offenen Lücken im Modell (für die Hinweisliste) */
 function luecken(m) {
@@ -336,7 +397,7 @@ function luecken(m) {
 /** Runs → reiner Text (Lücken in eckigen Klammern) */
 const text = runs => (Array.isArray(runs) ? runs : [runs]).map(r => (r && typeof r === 'object' ? r.gap : String(r == null ? '' : r))).join('');
 
-const API = { VERSION: 1, bericht, asbestBefund, kmfWerte, person, rollentext, namensteile, datumDE, zeilen, liste, zahlwort, probenSammeln, projektSicht, text, mitArtikel, objektImSatz };
+const API = { VERSION: 1, bericht, alsEntwurf, beschreibungKey, beschreibungWeichtAb, asbestBefund, kmfWerte, person, rollentext, namensteile, datumDE, zeilen, liste, zahlwort, probenSammeln, projektSicht, text, mitArtikel, objektImSatz };
 if (typeof module === 'object' && module.exports) module.exports = API;
 root.BerichtText = API;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

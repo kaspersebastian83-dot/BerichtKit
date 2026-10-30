@@ -3,9 +3,10 @@
    Schreibt nur: die Word-Datei in „Mitteilungen“ und – über „Einstellungen“ – _Spektron-BerichtKit.json im Archivordner.
    Laborwerte und Probenbezeichnungen werden nie bearbeitet; fehlende Angaben erscheinen im Bericht gelb markiert. */
 'use strict';
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 const APP_DATE = '30.10.2026';
 const CHANGELOG = [
+  ['1.3.0', '30.10.2026', 'Prüfungen vor dem Speichern: Versicherer aus der Projektzentrale (Feld „Versicherer“), sonst sichtbar „angenommen“; Probenehmer nur bei genauem Namen aus dem LabelKit-Feldbogen, sonst Hinweis „angenommen – bitte prüfen“ mit „✓ stimmt“; es zählt die LabelKit-Datei, die ResultKit übernommen hat; Entnahmestelle LabelKit ↔ Prüfbericht wird verglichen (vorerst Hinweis). Gesperrt wird „In Mitteilungen speichern“, wenn die LabelKit-Datei zu einem anderen Projekt gehört oder eine LabelKit-Probe noch kein Ergebnis hat (abwählbar) – dann gibt es nur „Entwurf herunterladen“ mit Kopfzeile „ENTWURF – nicht versenden“ und „_ENTWURF“ im Namen. Vorläufiger Prüfbericht: Hinweis und Kopfzeile „Vorläufig“. Gespeicherte Berichte merken sich die Prüfbericht-PDFs (Anlagen) und die Zahl der Lücken; danach „Ans Büro übergeben →“ in der Projektzentrale.'],
   ['1.2.0', '30.10.2026', 'Feinschliff nach dem ersten echten Bericht (26.0512): Versicherer als eigenes Feld – ist der Auftraggeber der VN selbst, erscheint er nicht mehr als Versicherer, sondern als Lücke; Auftraggeber im Satz mit Artikel („durch die … eG“); Lage wie „2. OG rechts“ im Text hinter der Adresse in Klammern; Labor-Nr. in Tabelle 1 ohne Umbruch; Hinweis, wenn der Probenehmer ohne festgelegte Rolle als Sachverständige(r) unterschreibt; Anlagen zweizeilig mit hängendem Einzug (Laborname bündig unter der Prüfbericht-Nr.); über jeder Überschrift zwei Leerzeilen, darunter eine, „1. Veranlassung“ ohne Abstand oben.'],
   ['1.1.0', '30.10.2026', 'Teil der Spektron-Suite: Spektron-Leiste oben (Projekt, Arbeitsschritte, Weiter), Knopf „📘 Handbuch“ (AidKit-Kapitel „BerichtKit Schritt für Schritt“), Angaben zum Bericht gemeinsam für alle im Projektordner („_Spektron/BerichtKit/_BerichtKit.json“, ältere Projekte „Mitteilungen“), offline nutzbar.'],
   ['1.0.0', '30.10.2026', 'Erste Fassung: Asbest-Untersuchungsbericht (Mitteilung) aus Projektzentrale, LabelKit, ResultKit und FotoKit – Vorschau, Lücken gelb, Word-Datei in „Mitteilungen“.'],
@@ -39,7 +40,7 @@ const PROJEKT_URL = {
   },
 };
 
-const S = { archiv: null, archivOk: false, dir: null, ordner: null, pj: null, lk: null, erg: null, fk: null, fotosDir: null,
+const S = { archiv: null, archivOk: false, dir: null, ordner: null, pj: null, lk: null, erg: null, fk: null, fotosDir: null, feldbogen: null,
   mitarbeiter: [], cfg: { personen: {} }, cfgText: null, cfgOrt: 'archiv', sig: {}, form: {}, fotoListe: {}, quellen: [], thumbs: {}, logo: null, laedt: false };
 
 /* ---------- Dateien ---------- */
@@ -109,7 +110,7 @@ async function oeffnen(dir) {
   fehler('');
   const nr = (/^(\d{2})\.(\d{4})/.exec(dir.name) || []).slice(1).join('.');
   S.ordner = { name: dir.name, nr, kuerzel: '' };
-  S.quellen = []; S.thumbs = {};
+  S.quellen = []; S.thumbs = {}; S.feldbogen = null; uebergabeZeigen('');
   const q = (ok, text) => S.quellen.push({ ok, text });
   try {
     await archivLesen();
@@ -120,16 +121,6 @@ async function oeffnen(dir) {
     if (rp && rp.data && rp.data.format === 'mosaik-projekt') { S.pj = rp.data; q(true, 'Projektdaten aus der Projektzentrale'); }
     else q(false, 'Keine Projektdaten (_Projekt.json) – in der Projektzentrale Objekt, Auftraggeber usw. eintragen.');
     S.ordner.kuerzel = ordnerKuerzel(dir.name);
-    // LabelKit: neueste *_Daten.json
-    S.lk = null;
-    const ol = await SO.ort(dir, 'labelkit');
-    if (ol.dir) {
-      let neu = null;
-      for await (const h of ol.dir.values()) if (h.kind === 'file' && /_Daten\.json$/i.test(h.name)) { const f = await h.getFile(); if (!neu || f.lastModified > neu.lastModified) neu = f; }
-      if (neu) { try { S.lk = JSON.parse(await neu.text()); q(true, `LabelKit: ${neu.name}`); } catch (e) { q(false, `LabelKit-Datei ${neu.name} nicht lesbar.`); } }
-    }
-    if (!S.lk) q(false, 'Keine LabelKit-Daten – Material und Entnahmestelle fehlen dann.');
-    else if (S.lk.projekt && S.lk.projekt.nr && nr && S.lk.projekt.nr !== nr) q(false, `LabelKit-Datei gehört zu Projekt ${S.lk.projekt.nr}, nicht zu ${nr}.`);
     // ResultKit
     S.erg = null;
     const or = await SO.ort(dir, 'resultkit');
@@ -138,6 +129,29 @@ async function oeffnen(dir) {
       S.erg = re.data; const am = T.datumDE(String(re.data.uebernommen || '').slice(0, 10)); q(true, 'Laborergebnisse aus ResultKit' + (am ? ` (übernommen ${am})` : ''));
       if (re.data.vollstaendig === false) q(false, 'ResultKit: noch nicht alle Ergebnisse da.');
     } else q(false, 'Keine Laborergebnisse – zuerst in ResultKit die Prüfberichte übernehmen.');
+    // LabelKit: die Datei, aus der ResultKit den Auftrag übernommen hat (auftrag.quelle) – sonst die neueste *_Daten.json.
+    // Fremde Projektnummer prüft das Berichtsmodell (sperrt das Speichern).
+    S.lk = null;
+    const ol = await SO.ort(dir, 'labelkit'), quelle = String((S.erg && S.erg.auftrag && S.erg.auftrag.quelle) || '').trim();
+    if (ol.dir) {
+      let neu = null, genau = null;
+      for await (const h of ol.dir.values()) if (h.kind === 'file' && /_Daten\.json$/i.test(h.name)) {
+        const f = await h.getFile(); if (h.name === quelle) genau = f; if (!neu || f.lastModified > neu.lastModified) neu = f;
+      }
+      const datei = genau || neu;
+      if (datei) {
+        try {
+          S.lk = JSON.parse(await datei.text());
+          if (genau) q(true, `LabelKit: ${datei.name} (wie in ResultKit übernommen)`);
+          else q(false, quelle ? `LabelKit-Datei „${quelle}“ aus ResultKit nicht gefunden – genommen: ${datei.name} (neueste).`
+            : `LabelKit: ${datei.name} (neueste) – ResultKit nennt keine LabelKit-Datei; dort die Ergebnisse erneut übernehmen.`);
+        } catch (e) { q(false, `LabelKit-Datei ${datei.name} nicht lesbar.`); }
+      }
+    }
+    if (!S.lk) q(false, 'Keine LabelKit-Daten – Material und Entnahmestelle fehlen dann.');
+    // Probenehmer laut Feldbogen (asbestmat) – zugeordnet nur bei genauem Namen oder Kürzel
+    const fp = ((S.lk && S.lk.feldprotokolle) || []).find(x => x && x.typ === 'asbestmat' && x.kopf && x.kopf.probenehmer);
+    S.feldbogen = fp ? { text: String(fp.kopf.probenehmer).trim(), kuerzel: personFinden(fp.kopf.probenehmer) } : null;
     // FotoKit
     S.fk = null; S.fotosDir = await SO.unter(dir, ['Fotos']).catch(() => null);
     const of = await SO.ort(dir, 'fotokit');
@@ -195,10 +209,11 @@ function fotoListeBauen() {
     }
   }
 }
+/** Person zu einem Namen aus dem Feldbogen – nur bei genauem Treffer (Name, Kürzel; Leerraum und Groß-/Kleinschreibung egal).
+    LabelKit schlägt die Namen der Mitarbeiterliste vor; ungefähre Treffer wären geraten. */
 function personFinden(text) {
-  const t = String(text || '').trim().toLowerCase(); if (!t) return '';
-  const p = S.mitarbeiter.find(x => [x.ordnerKuerzel, x.appKuerzel, x.name].some(v => String(v || '').trim().toLowerCase() === t))
-    || S.mitarbeiter.find(x => x.name && x.name.toLowerCase().includes(t));
+  const n = v => String(v || '').normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase(), t = n(text); if (!t) return '';
+  const p = S.mitarbeiter.find(x => [x.ordnerKuerzel, x.appKuerzel, x.name, ((S.cfg.personen || {})[x.ordnerKuerzel] || {}).name].some(v => n(v) === t));
   return p ? p.ordnerKuerzel : '';
 }
 const rolle = k => ((S.cfg.personen || {})[k] || {}).rolle === 'mt' ? 'mt' : 'sv';
@@ -211,8 +226,7 @@ async function formStart() {
   const key = 'berichtkit:form:' + (S.ordner.nr || S.ordner.name);
   let gespeichert = {}; try { gespeichert = JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch (e) { /* leer */ }
   const P = T.projektSicht(S.pj, S.ordner);
-  const fp = ((S.lk && S.lk.feldprotokolle) || []).find(x => x && x.typ === 'asbestmat' && x.kopf && x.kopf.probenehmer);
-  const pn = personFinden(fp && fp.kopf.probenehmer) || P.zustaendig;
+  const pn = (S.feldbogen && S.feldbogen.kuerzel) || P.zustaendig;
   const svListe = S.mitarbeiter.filter(p => rolle(p.ordnerKuerzel) === 'sv');
   const sv = P.zustaendig && rolle(P.zustaendig) === 'sv' ? P.zustaendig : (svListe[0] && svListe[0].ordnerKuerzel) || '';
   const vorgabe = { datum: heute(), mitteilung: await naechsteMitteilung(), variante: 'eigen', eingangsdatum: '', auftragsdatum: P.auftragsdatum,
@@ -317,7 +331,7 @@ function formLokal() { try { localStorage.setItem(S.formKey, JSON.stringify(S.fo
 
 /* ---------- Modell ---------- */
 function modell() {
-  return T.bericht({ pj: S.pj, ordner: S.ordner, lk: S.lk, erg: S.erg, cfg: S.cfg, mitarbeiter: S.mitarbeiter, fotos: S.fotoListe, form: S.form });
+  return T.bericht({ pj: S.pj, ordner: S.ordner, lk: S.lk, erg: S.erg, cfg: S.cfg, mitarbeiter: S.mitarbeiter, fotos: S.fotoListe, feldbogen: S.feldbogen, form: S.form });
 }
 
 /* ---------- Anzeige ---------- */
@@ -340,11 +354,15 @@ function render() {
   $('qAuftrag').textContent = P.auftragsdatum ? (f.auftragsdatum === P.auftragsdatum ? 'aus der Projektzentrale' : `Projektzentrale: ${T.datumDE(P.auftragsdatum)}`) : 'in der Projektzentrale nicht eingetragen';
   $('fAg').value = f.agSatz || '';
   { const agName = T.zeilen(P.ag)[0] || '', agIstVn = agName && agName.toLowerCase() === (T.zeilen(P.vn)[0] || '').toLowerCase();
+    const pjVers = T.zeilen(P.versicherer)[0] || '';
     $('zeileVers').hidden = !P.versicherungsfall; $('fVers').value = f.versicherer || '';
-    $('fVers').placeholder = agIstVn || !agName ? 'bitte eintragen' : agName;
-    $('qVers').textContent = f.versicherer ? 'eigene Angabe (Deckblatt)' : agIstVn ? 'Auftraggeber ist der VN selbst – Versicherer unbekannt' : agName ? 'Auftraggeber aus der Projektzentrale' : 'in der Projektzentrale nicht eingetragen'; }
+    $('fVers').placeholder = pjVers || (agIstVn || !agName ? 'bitte eintragen' : agName);
+    $('qVers').textContent = f.versicherer ? 'eigene Angabe (Deckblatt)' : pjVers ? 'aus der Projektzentrale' : agIstVn ? 'Auftraggeber ist der VN selbst – Versicherer unbekannt'
+      : agName ? 'angenommen: Auftraggeber = Versicherer – bitte prüfen' : 'in der Projektzentrale nicht eingetragen'; }
   $('agInfo').textContent = P.versicherungsfall ? 'Versicherungsfall: Deckblatt mit VN, Risiko, Versicherer und Schaden-Nr.' : 'Direkter Auftrag: Deckblatt mit Auftraggeber, Schadenort und Schaden-Nr.';
   optionen($('fPn'), f.probenehmer, '– bitte wählen –'); $('zeilePn').hidden = zug;
+  { const q = m.probenehmerQuelle; $('qPn').textContent = q ? (q.angenommen ? 'angenommen – bitte prüfen' : q.text) : '';
+    $('qPn').classList.toggle('annahme', !!(q && q.angenommen)); $('btnPnOk').hidden = !(q && q.angenommen); }
   optionen($('fSv'), f.sv, '– bitte wählen –', k => rolle(k) === 'sv');
   optionen($('fMt'), f.mt, 'keine'); $('zeileMt').hidden = zug;
   $('fLabor').value = f.labor || '';
@@ -370,27 +388,37 @@ function render() {
       <td style="white-space:nowrap">${esc(p.ref || p.label)}<div class="klein" style="font-size:10.5px">${esc(p.labNr)}</div></td>
       <td>${x.material ? esc(x.material) : '<span class="befund unk">Material fehlt</span>'}<div class="klein">${esc(x.stelle)}</div>${unter ? `<div class="unter">${unter}</div>` : ''}</td>
       <td>${bef}</td></tr>`;
-  }).join('') : '<tr><td colspan="4" class="klein">Keine Asbestergebnisse gefunden.</td></tr>';
+  }).join('') + m.offen.map(o => `<tr class="${o.aus ? 'aus' : ''}"><td><input type="checkbox" data-art="aus" data-l="${esc(o.label)}" ${o.aus ? '' : 'checked'} title="Abwählen, wenn die Probe nicht in diesen Bericht gehört"></td>
+      <td>${esc(o.label)}</td><td>${o.material ? esc(o.material) : '–'}<div class="klein">${esc(o.stelle)}</div></td><td><span class="befund unk">noch kein Ergebnis</span></td></tr>`).join('')
+    : '<tr><td colspan="4" class="klein">Keine Asbestergebnisse gefunden.</td></tr>';
   $('einbauWahl').hidden = !m.proben.some(p => p.istKmf && p.whoNachgewiesen);
   document.querySelectorAll('input[name=einbau]').forEach(r => { r.checked = r.value === (f.einbau || 'unbekannt'); });
   // Hinweise
   $('hinweise').innerHTML = [
+    ...m.sperren.map(x => `<li class="sperre">Gesperrt: ${esc(x)}</li>`),
+    ...(m.probenehmerQuelle && m.probenehmerQuelle.angenommen ? [`<li class="luecke">${esc(m.probenehmerQuelle.text)}</li>`] : []),
     ...m.luecken.map(l => `<li class="luecke">Lücke im Bericht: ${esc(l)}</li>`),
     ...m.hinweise.map(h => `<li>${esc(h)}</li>`),
     ...S.quellen.map(q => `<li class="${q.ok ? 'ok' : ''}">${q.ok ? '✓ ' : ''}${esc(q.text)}</li>`),
     ...(S.cfgOrt === 'lokal' ? ['<li>Archivordner nicht verbunden: Einstellungen gelten nur in diesem Browser.</li>'] : []),
   ].join('');
-  vorschau(m);
-  $('status').textContent = `Speichert als Mitteilungen/${m.dateiname}` + (m.luecken.length ? ` · ${m.luecken.length} Lücke(n) gelb markiert` : '');
+  const gesperrt = m.sperren.length > 0;
+  vorschau(gesperrt ? T.alsEntwurf(m) : m);
+  $('btnErstellen').disabled = gesperrt;
+  $('btnErstellen').title = gesperrt ? 'Gesperrt: ' + m.sperren.join(' · ') : '';
+  $('btnLaden').textContent = gesperrt ? 'Entwurf herunterladen' : 'Herunterladen';
+  $('status').textContent = gesperrt ? `Speichern gesperrt (${m.sperren.length}) – siehe Hinweise. „Entwurf herunterladen“ geht.`
+    : `Speichert als Mitteilungen/${m.dateiname}` + (m.luecken.length ? ` · ${m.luecken.length} Lücke(n) gelb markiert` : '');
 }
 function runsHtml(r) { return (Array.isArray(r) ? r : [r]).map(x => x && typeof x === 'object' ? `<span class="gap">${esc(x.gap)}</span>` : esc(x)).join(''); }
 function vorschau(m) {
   const d = m.deckblatt;
-  const deck = `<div class="blatt"><p class="titel">${esc(d.titel)}</p><p class="mitt">(${esc(d.mitteilung)})</p>
+  const kenn = (m.kennzeilen || []).length ? `<p class="kenn">${m.kennzeilen.map(k => `<span class="${esc(k.art)}">${esc(k.text)}</span>`).join(' · ')}</p>` : '';
+  const deck = `<div class="blatt">${kenn}<p class="titel">${esc(d.titel)}</p><p class="mitt">(${esc(d.mitteilung)})</p>
     <div class="zeile"><span>Projektnummer:</span><span>${runsHtml(d.projektnummer || { gap: '[Projektnummer]' })}</span></div>
     <p style="margin:0 0 12px;text-align:left;line-height:1.35">${runsHtml(d.betreff)}</p>
     ${d.felder.map(([k, v]) => `<div class="zeile"><span>${esc(k)}</span><span>${v.map(runsHtml).join('<br>')}</span></div>`).join('')}</div>`;
-  const teile = [`<div class="kopfzeilen">${m.kopf.map(runsHtml).join('<br>')}</div>`];
+  const teile = [`${kenn}<div class="kopfzeilen">${m.kopf.map(runsHtml).join('<br>')}</div>`];
   for (const a of m.abschnitte) {
     teile.push(`<h3>${esc(a.titel)}</h3>`);
     for (const x of a.inhalt) {
@@ -440,8 +468,7 @@ async function logoLaden() {
 }
 
 /* ---------- Word-Datei ---------- */
-async function wordBlob() {
-  const m = modell();
+async function wordBlob(m) {
   if (!m.proben.length) throw new Error('Keine Proben im Bericht.');
   const bilder = { ...(await logoLaden()), sig: {}, fotos: {} };
   for (const u of m.unterschriften) { const b = u.kuerzel && S.sig[u.kuerzel.toLowerCase()]; if (b) bilder.sig[u.kuerzel] = b; }
@@ -451,9 +478,11 @@ async function wordBlob() {
   return { blob, m, fehlen };
 }
 async function speichern() {
-  const knopf = $('btnErstellen'); knopf.disabled = true; $('status').textContent = 'Word-Datei wird erstellt …';
+  const knopf = $('btnErstellen'), m0 = modell();
+  if (m0.sperren.length) { fehler('Nicht gespeichert – ' + m0.sperren.join(' ')); return; }   // Knopf ist dann ohnehin aus
+  knopf.disabled = true; $('status').textContent = 'Word-Datei wird erstellt …'; uebergabeZeigen('');
   try {
-    const { blob, m, fehlen } = await wordBlob();
+    const { blob, m, fehlen } = await wordBlob(m0);
     if (m.luecken.length && !confirm(`Im Bericht sind noch ${m.luecken.length} Lücke(n) gelb markiert:\n${m.luecken.join(', ')}\n\nTrotzdem speichern?`)) { render(); return; }
     if (!(await erlaubt(S.dir, true))) throw new Error('Kein Schreibzugriff auf den Projektordner.');
     const ziel = await SO.unter(S.dir, ['Mitteilungen'], true);
@@ -468,16 +497,25 @@ async function speichern() {
     const zurueck = await (await fh.getFile()).arrayBuffer();
     if (zurueck.byteLength !== blob.size) throw new Error('Gespeicherte Datei ist unvollständig – bitte erneut versuchen.');
     clearTimeout(S.zustand.geplant);
-    await zustandSchreiben({ datei: name, am: new Date().toISOString(), von: ich() }).catch(e => fehler('Bericht gespeichert, Angaben dazu nicht: ' + (e && e.message || e)));
+    // Protokoll: welche Prüfbericht-PDFs als Anlage dazugehören (für die Übergabe) und wie viele Lücken beim Speichern offen waren
+    await zustandSchreiben({ datei: name, am: new Date().toISOString(), von: ich(), anlagen: m.anlagenDateien, luecken: m.luecken.length })
+      .catch(e => fehler('Bericht gespeichert, Angaben dazu nicht: ' + (e && e.message || e)));
     if (window.MosaikLeiste) MosaikLeiste.aktualisieren();
     $('status').innerHTML = `<span class="ok">✓ Gespeichert: Mitteilungen/${esc(name)}</span>` + (fehlen.length ? ` · Foto(s) nicht lesbar: ${esc(fehlen.join(', '))}` : '');
+    uebergabeZeigen(name);
   } catch (e) {
     $('status').textContent = ''; fehler('Speichern fehlgeschlagen: ' + (e && e.message || e));
-  } finally { knopf.disabled = false; }
+  } finally { knopf.disabled = modell().sperren.length > 0; }
+}
+/** Nach dem Speichern: in der Projektzentrale „Ans Büro übergeben“ – Word-Datei und Prüfberichte dort vorbelegt. */
+function uebergabeZeigen(datei) {
+  const a = $('btnUebergabe'); if (!a) return;
+  a.hidden = !datei || !S.dir;
+  a.href = datei && S.dir ? `../Projektzentrale/#projekt=${encodeURIComponent(S.dir.name)}&uebergabe=${encodeURIComponent('Mitteilungen/' + datei)}` : '#';
 }
 async function herunterladen() {
   try {
-    const { blob, m } = await wordBlob();
+    const m0 = modell(), { blob, m } = await wordBlob(m0.sperren.length ? T.alsEntwurf(m0) : m0);
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = m.dateiname; document.body.append(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
   } catch (e) { fehler('Erstellen fehlgeschlagen: ' + (e && e.message || e)); }
@@ -538,7 +576,9 @@ function verbinden() {
   $('fAuftrag').onchange = e => setze('auftragsdatum', e.target.value);
   $('fAg').oninput = e => { S.form.agSatz = e.target.value; formMerken('agSatz'); vorschau(modell()); };
   $('fAg').onchange = () => render();
-  $('fPn').onchange = e => { const k = e.target.value; S.form.probenehmer = k; if (k && rolle(k) === 'mt') S.form.mt = k; else if (S.form.mt && S.form.mt !== k && rolle(S.form.mt) === 'mt') S.form.mt = ''; S.zustand.offen.add('mt'); setze('probenehmer', k); };
+  $('fPn').onchange = e => { const k = e.target.value; S.form.probenehmer = k; if (k && rolle(k) === 'mt') S.form.mt = k; else if (S.form.mt && S.form.mt !== k && rolle(S.form.mt) === 'mt') S.form.mt = '';
+    S.form.pnQuelle = 'hand'; S.zustand.offen.add('mt'); S.zustand.offen.add('pnQuelle'); setze('probenehmer', k); };
+  $('btnPnOk').onclick = () => setze('pnQuelle', 'hand');
   $('fSv').onchange = e => setze('sv', e.target.value);
   $('fMt').onchange = e => setze('mt', e.target.value);
   $('fLabor').onchange = e => setze('labor', e.target.value.trim());

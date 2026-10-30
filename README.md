@@ -9,8 +9,8 @@ Adresse: `https://kaspersebastian83-dot.github.io/berichtkit/` · aus der Projek
 
 | Im Bericht | Quelle | Datei |
 |---|---|---|
-| Deckblatt (VN/Auftraggeber, Risiko/Schadenort, Versicherer, Schaden-Nr.), Auftragsdatum | Projektzentrale | `_Projekt.json` |
-| Proben: Entnahmestelle, Material, Probenahmedatum | LabelKit (Asbest-Tabelle) | `*_Daten.json` (neueste) |
+| Deckblatt (VN/Auftraggeber, Risiko/Schadenort, Versicherer, Schaden-Nr.), Auftragsdatum | Projektzentrale | `_Projekt.json` (`versicherer`; fehlt es, gilt der Auftraggeber – als „angenommen“ angezeigt) |
+| Proben: Entnahmestelle, Material, Probenahmedatum; Probenehmer (Feldbogen, nur genauer Name) | LabelKit (Asbest-Tabelle) | `*_Daten.json` – die Datei, die ResultKit übernommen hat (`auftrag.quelle`), sonst die neueste |
 | Ergebnis, Labor-Nr., Prüfbericht-Nr., KI-Wert (falls im XML) | ResultKit | `_Ergebnisse.json` |
 | Fotos zu den Proben (Probe-Nr. in FotoKit) | FotoKit | `_Bildumbenenner.json` + `Fotos/` |
 | Namen | Projektzentrale | `<Archiv>/_Spektron-Mitarbeiter.json` |
@@ -37,6 +37,17 @@ Die Ablageorte im Projekt bestimmt das gemeinsame Modul `spektron-ordner.js` (Be
 - **Nichts wird erfunden.** Fehlt eine Angabe, steht sie im Bericht als gelb markierte Lücke, z. B. `[Auftragsdatum]`.
 - **Keine Namen, Unterschriften oder Kundendaten im Repository** – Namen kommen aus der Mitarbeiterliste, Unterschriften aus dem Archivordner.
   Die Testdaten sind erfunden.
+
+## Prüfungen vor dem Speichern
+
+- **Gesperrt** (nur „Entwurf herunterladen“ mit Kopfzeile „ENTWURF – nicht versenden“ und `_ENTWURF` im Dateinamen):
+  LabelKit-Datei eines anderen Projekts; LabelKit-Asbestprobe ohne Ergebnis in ResultKit (unter „Proben“ abwählbar).
+- **Hinweis:** Entnahmestelle LabelKit ↔ Prüfbericht weicht ab (Vergleich wie ResultKit `beschreibungWeichtAb`; wird nach dem
+  Gegentest mit echten Projekten zur Sperre, Schalter `ABGLEICH_SPERRT` in `bericht-text.js`); vorläufiger Prüfbericht (dazu Kopfzeile
+  „Vorläufig“); Versicherer oder Probenehmer nur angenommen.
+- **Lücken** sperren nicht – Rückfrage vor dem Speichern; die Übergabe ans Büro prüft, ob noch welche in der Word-Datei stehen.
+- Nach dem Speichern: `_BerichtKit.json` → `berichte[]` mit `anlagen` (`Laborergebnisse/<Prüfbericht>.pdf`) und `luecken`; Knopf
+  „Ans Büro übergeben →“ öffnet `../Projektzentrale/#projekt=<Ordner>&uebergabe=Mitteilungen/<Datei>`.
 
 ## Texte
 
