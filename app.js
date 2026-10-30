@@ -3,9 +3,10 @@
    Schreibt nur: die Word-Datei in „Mitteilungen“ und – über „Einstellungen“ – _Spektron-BerichtKit.json im Archivordner.
    Laborwerte und Probenbezeichnungen werden nie bearbeitet; fehlende Angaben erscheinen im Bericht gelb markiert. */
 'use strict';
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 const APP_DATE = '30.10.2026';
 const CHANGELOG = [
+  ['1.4.0', '30.10.2026', 'Deckblatt „mit Versicherung“ (VN · Risiko · Versicherer) oder „ohne Versicherung“ (Auftraggeber · Schadenort) unter „Auftrag“ umstellbar – z. B. für Hausverwaltung, Sanierer oder Privatauftrag. Ohne Wahl entscheiden die Projektdaten: Versicherer eingetragen → mit; kein VN → ohne; VN da, aber der Auftraggeber ist keine Versicherung → ohne (mit Hinweis). Unterschriften: Jede Unterschrift kann jede Person sein, mit „als Sachverständige(r)“ oder „als Messtechniker(in)“ – vorgewählt nach den Einstellungen, für diesen Bericht änderbar (z. B. Messtechniker allein).'],
   ['1.3.0', '30.10.2026', 'Prüfungen vor dem Speichern: Versicherer aus der Projektzentrale (Feld „Versicherer“), sonst sichtbar „angenommen“; Probenehmer nur bei genauem Namen aus dem LabelKit-Feldbogen, sonst Hinweis „angenommen – bitte prüfen“ mit „✓ stimmt“; es zählt die LabelKit-Datei, die ResultKit übernommen hat; Entnahmestelle LabelKit ↔ Prüfbericht wird verglichen (vorerst Hinweis). Gesperrt wird „In Mitteilungen speichern“, wenn die LabelKit-Datei zu einem anderen Projekt gehört oder eine LabelKit-Probe noch kein Ergebnis hat (abwählbar) – dann gibt es nur „Entwurf herunterladen“ mit Kopfzeile „ENTWURF – nicht versenden“ und „_ENTWURF“ im Namen. Vorläufiger Prüfbericht: Hinweis und Kopfzeile „Vorläufig“. Gespeicherte Berichte merken sich die Prüfbericht-PDFs (Anlagen) und die Zahl der Lücken; danach „Ans Büro übergeben →“ in der Projektzentrale.'],
   ['1.2.0', '30.10.2026', 'Feinschliff nach dem ersten echten Bericht (26.0512): Versicherer als eigenes Feld – ist der Auftraggeber der VN selbst, erscheint er nicht mehr als Versicherer, sondern als Lücke; Auftraggeber im Satz mit Artikel („durch die … eG“); Lage wie „2. OG rechts“ im Text hinter der Adresse in Klammern; Labor-Nr. in Tabelle 1 ohne Umbruch; Hinweis, wenn der Probenehmer ohne festgelegte Rolle als Sachverständige(r) unterschreibt; Anlagen zweizeilig mit hängendem Einzug (Laborname bündig unter der Prüfbericht-Nr.); über jeder Überschrift zwei Leerzeilen, darunter eine, „1. Veranlassung“ ohne Abstand oben.'],
   ['1.1.0', '30.10.2026', 'Teil der Spektron-Suite: Spektron-Leiste oben (Projekt, Arbeitsschritte, Weiter), Knopf „📘 Handbuch“ (AidKit-Kapitel „BerichtKit Schritt für Schritt“), Angaben zum Bericht gemeinsam für alle im Projektordner („_Spektron/BerichtKit/_BerichtKit.json“, ältere Projekte „Mitteilungen“), offline nutzbar.'],
@@ -355,16 +356,22 @@ function render() {
   $('fAg').value = f.agSatz || '';
   { const agName = T.zeilen(P.ag)[0] || '', agIstVn = agName && agName.toLowerCase() === (T.zeilen(P.vn)[0] || '').toLowerCase();
     const pjVers = T.zeilen(P.versicherer)[0] || '';
-    $('zeileVers').hidden = !P.versicherungsfall; $('fVers').value = f.versicherer || '';
+    $('zeileVers').hidden = !m.versicherungsfall; $('fVers').value = f.versicherer || '';
     $('fVers').placeholder = pjVers || (agIstVn || !agName ? 'bitte eintragen' : agName);
     $('qVers').textContent = f.versicherer ? 'eigene Angabe (Deckblatt)' : pjVers ? 'aus der Projektzentrale' : agIstVn ? 'Auftraggeber ist der VN selbst – Versicherer unbekannt'
       : agName ? 'angenommen: Auftraggeber = Versicherer – bitte prüfen' : 'in der Projektzentrale nicht eingetragen'; }
-  $('agInfo').textContent = P.versicherungsfall ? 'Versicherungsfall: Deckblatt mit VN, Risiko, Versicherer und Schaden-Nr.' : 'Direkter Auftrag: Deckblatt mit Auftraggeber, Schadenort und Schaden-Nr.';
+  // Deckblatt mit/ohne Versicherung: ohne Wahl nach den Projektdaten (bericht-text.js versicherungsfallAuto), sonst die eigene Wahl
+  document.querySelectorAll('input[name=deckblatt]').forEach(r => { r.checked = r.value === (m.versicherungsfall ? 'versicherung' : 'direkt'); });
+  $('qDeckblatt').textContent = f.deckblatt ? 'selbst gewählt' : `automatisch: ${P.versicherungsfallGrund}`;
+  $('btnDeckblattAuto').hidden = !f.deckblatt;
   optionen($('fPn'), f.probenehmer, '– bitte wählen –'); $('zeilePn').hidden = zug;
   { const q = m.probenehmerQuelle; $('qPn').textContent = q ? (q.angenommen ? 'angenommen – bitte prüfen' : q.text) : '';
     $('qPn').classList.toggle('annahme', !!(q && q.angenommen)); $('btnPnOk').hidden = !(q && q.angenommen); }
-  optionen($('fSv'), f.sv, '– bitte wählen –', k => rolle(k) === 'sv');
+  optionen($('fSv'), f.sv, '– bitte wählen –');
   optionen($('fMt'), f.mt, 'keine'); $('zeileMt').hidden = zug;
+  // „als …“: eigene Wahl für diesen Bericht, sonst die Rolle aus den Einstellungen
+  $('fR1').value = f.rolle1 || rolle(f.sv); $('fR1').disabled = !f.sv;
+  $('fR2').value = f.rolle2 || rolle(f.mt); $('fR2').disabled = !f.mt;
   $('fLabor').value = f.labor || '';
   // Proben
   const alle = T.probenSammeln(S.erg, S.lk).proben, imBericht = new Map(m.proben.map(p => [p.label, p]));
@@ -579,8 +586,13 @@ function verbinden() {
   $('fPn').onchange = e => { const k = e.target.value; S.form.probenehmer = k; if (k && rolle(k) === 'mt') S.form.mt = k; else if (S.form.mt && S.form.mt !== k && rolle(S.form.mt) === 'mt') S.form.mt = '';
     S.form.pnQuelle = 'hand'; S.zustand.offen.add('mt'); S.zustand.offen.add('pnQuelle'); setze('probenehmer', k); };
   $('btnPnOk').onclick = () => setze('pnQuelle', 'hand');
-  $('fSv').onchange = e => setze('sv', e.target.value);
-  $('fMt').onchange = e => setze('mt', e.target.value);
+  // Neue Person: „als …“ wieder nach den Einstellungen; gleiche Rolle wie in den Einstellungen = keine eigene Wahl
+  $('fSv').onchange = e => { S.form.rolle1 = ''; S.zustand.offen.add('rolle1'); setze('sv', e.target.value); };
+  $('fMt').onchange = e => { S.form.rolle2 = ''; S.zustand.offen.add('rolle2'); setze('mt', e.target.value); };
+  $('fR1').onchange = e => setze('rolle1', e.target.value === rolle(S.form.sv) ? '' : e.target.value);
+  $('fR2').onchange = e => setze('rolle2', e.target.value === rolle(S.form.mt) ? '' : e.target.value);
+  document.querySelectorAll('input[name=deckblatt]').forEach(r => { r.onchange = () => setze('deckblatt', r.value); });
+  $('btnDeckblattAuto').onclick = () => setze('deckblatt', '');
   $('fLabor').onchange = e => setze('labor', e.target.value.trim());
   $('fVers').onchange = e => setze('versicherer', e.target.value.trim());
   document.querySelectorAll('input[name=variante]').forEach(r => { r.onchange = () => setze('variante', r.value); });

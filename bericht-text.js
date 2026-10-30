@@ -157,11 +157,23 @@ function probenSammeln(erg, lk) {
 }
 
 /* ---------- Projektdaten ---------- */
+/** Sieht der Name nach einer Versicherung aus? (Auftraggeber im Versicherungsfall ist meist die Versicherung selbst.) */
+const VERSICHERER = /versicher|assekura|allianz|\baxa\b|\bergo\b|\bhuk\b|provinzial|gothaer|\bzurich\b|generali|signal iduna|\br\s*\+\s*v\b|\bdevk\b|\blvm\b|\bvhv\b|\bvgh\b|helvetia|basler|barmenia|continentale|alte leipziger|württembergische|nürnberger|concordia|debeka|mecklenburgische|uelzener|ammerländer/i;
+const istVersicherer = name => VERSICHERER.test(s(name));
+/** Deckblatt „mit Versicherung“ (VN · Risiko · Versicherer) oder „ohne“ (Auftraggeber · Schadenort), wenn im Bericht nichts gewählt ist:
+    Versicherer in der Projektzentrale → mit; kein VN → ohne; VN da: mit, wenn der Auftraggeber eine Versicherung ist, sonst ohne
+    (Hausverwaltung, Sanierer, Privatauftrag …). Im Bericht unter „Auftrag“ umstellbar (form.deckblatt). */
+function versicherungsfallAuto(vn, ag, versicherer) {
+  if (versicherer) return { ja: true, grund: 'Versicherer in der Projektzentrale eingetragen' };
+  if (!vn) return { ja: false, grund: 'kein VN in der Projektzentrale' };
+  if (istVersicherer(nameVon(ag))) return { ja: true, grund: 'Auftraggeber ist eine Versicherung' };
+  return { ja: false, grund: 'VN eingetragen, aber der Auftraggeber ist keine Versicherung' };
+}
 function projektSicht(pj, ordner) {
   pj = pj || {};
   const vn = s(pj.versicherungsnehmer), ag = s(pj.auftraggeber), objekt = s(pj.objekt);
-  const versicherungsfall = !!vn;
-  return { nr: s(pj.projektnummer) || s(ordner && ordner.nr), versicherungsfall, vn, ag, objekt, versicherer: s(pj.versicherer),
+  const auto = versicherungsfallAuto(vn, ag, s(pj.versicherer));
+  return { nr: s(pj.projektnummer) || s(ordner && ordner.nr), versicherungsfall: auto.ja, versicherungsfallGrund: auto.grund, vn, ag, objekt, versicherer: s(pj.versicherer),
     schadennummer: s(pj.schadennummer), auftragsdatum: s(pj.auftragsdatum), zustaendig: s(pj.zustaendig && pj.zustaendig.kuerzel) || s(ordner && ordner.kuerzel),
     sachverstaendiger: s(pj.sachverstaendiger) };
 }
@@ -170,7 +182,8 @@ function projektSicht(pj, ordner) {
    eingabe = { pj, ordner:{name,nr,kuerzel}, lk, erg, cfg, mitarbeiter, fotos:{label:[{datei,...}]},
                feldbogen:{ text, kuerzel } (Probenehmer laut LabelKit-Feldbogen, kuerzel nur bei genauem Treffer),
                form:{ datum, mitteilung, variante:'eigen'|'zugestellt', eingangsdatum, auftragsdatum, agSatz, versicherer,
-                      probenahmedatum, probenehmer, pnQuelle:'hand'|undefined, sv, mt, labor, aus:{label:false}, kmf:{label:true},
+                      deckblatt:'versicherung'|'direkt'|'' (leer = automatisch), probenahmedatum, probenehmer, pnQuelle:'hand'|undefined,
+                      sv (1. Unterschrift), mt (2. Unterschrift), rolle1, rolle2:'sv'|'mt'|'' (leer = laut Einstellungen), labor, aus:{label:false}, kmf:{label:true},
                       who:{label:true}, ki:{label:'25'}, foto:{label:'datei'|''}, einbau:'vor1996'|'unbekannt' } }
    Ergebnis: { dateiname, deckblatt, kopf, kennzeilen[], abschnitte, unterschriften, anlagen, anlagenDateien[], luecken[], hinweise[],
                sperren[], probenehmerQuelle, offen[] }
@@ -229,13 +242,15 @@ function bericht(eingabe) {
   const felder = [];
   // Versicherer: Eingabe, dann Feld „Versicherer“ der Projektzentrale, sonst angenommen: Auftraggeber (der Arbeitszettel-Import
   // schreibt im Versicherungsfall die Versicherung dorthin) – aber nicht, wenn der Auftraggeber der VN selbst ist (→ Lücke).
-  const agIstVn = P.versicherungsfall && gleicherName(nameVon(P.ag), nameVon(P.vn));
+  const vfall = f.deckblatt === 'versicherung' ? true : f.deckblatt === 'direkt' ? false : P.versicherungsfall;
+  if (!f.deckblatt && !vfall && P.vn) hinweise.push(`Deckblatt ohne Versicherung (${P.versicherungsfallGrund}) – ist doch eine Versicherung beteiligt, unter „Auftrag“ umstellen.`);
+  const agIstVn = vfall && gleicherName(nameVon(P.ag), nameVon(P.vn));
   const versicherer = s(f.versicherer) || nameVon(P.versicherer) || (agIstVn ? '' : nameVon(P.ag));
-  if (P.versicherungsfall && !s(f.versicherer) && !P.versicherer) {
+  if (vfall && !s(f.versicherer) && !P.versicherer) {
     if (agIstVn) hinweise.push('Auftraggeber und VN sind gleich – Versicherer bitte unter „Versicherer“ eintragen.');
     else if (versicherer) hinweise.push(`Versicherer angenommen: Auftraggeber „${versicherer}“ – bitte prüfen (in der Projektzentrale „Versicherer“ eintragen).`);
   }
-  if (P.versicherungsfall) {
+  if (vfall) {
     felder.push(['VN:', zeilen(P.vn)], ['Risiko:', zeilen(P.objekt)], ['Versicherer:', [versicherer].filter(Boolean)]);
   } else {
     felder.push(['Auftraggeber:', zeilen(P.ag)], ['Schadenort:', zeilen(P.objekt)]);
@@ -244,8 +259,8 @@ function bericht(eingabe) {
   felder.forEach(([k, v]) => { if (!v.length) v.push({ gap: `[${k.replace(':', '')}]` }); });
 
   const kopf = [`Untersuchungsbericht vom ${datum}`, betreffRuns,
-    P.versicherungsfall ? ['VN: ', L(zeilen(P.vn).join(', '), 'VN')] : ['AG: ', L(zeilen(P.ag).join(', '), 'Auftraggeber')],
-    [P.versicherungsfall ? 'Risiko: ' : 'Schadenort: ', L(zeilen(P.objekt).join(', '), 'Objekt')]];
+    vfall ? ['VN: ', L(zeilen(P.vn).join(', '), 'VN')] : ['AG: ', L(zeilen(P.ag).join(', '), 'Auftraggeber')],
+    [vfall ? 'Risiko: ' : 'Schadenort: ', L(zeilen(P.objekt).join(', '), 'Objekt')]];
 
   /* 1. Veranlassung */
   const objekt = L(objektImSatz(P.objekt), 'Objekt');
@@ -337,13 +352,14 @@ function bericht(eingabe) {
   }
 
   /* Unterschriften und Anlagen */
-  const unterschriften = [];
-  if (sv) unterschriften.push({ kuerzel: sv.kuerzel, rolle: rollentext(sv), name: sv.name });
+  // Je Unterschrift: Person und Rolle („als Sachverständige(r)“ / „als Messtechniker(in)“); ohne Wahl gilt die Rolle aus den Einstellungen
+  const unterschriften = [], alsRolle = (p, r) => p && (r === 'sv' || r === 'mt') ? { ...p, rolle: r } : p;
+  const u1 = alsRolle(sv, f.rolle1), u2 = alsRolle(mt, f.rolle2);
+  if (u1) unterschriften.push({ kuerzel: u1.kuerzel, rolle: rollentext(u1), name: u1.name });
   else unterschriften.push({ kuerzel: '', rolle: 'Sachverständige(r)', name: { gap: '[Sachverständige(r)]' } });
-  if (mt && (!sv || mt.kuerzel !== sv.kuerzel)) unterschriften.push({ kuerzel: mt.kuerzel, rolle: rollentext(mt), name: mt.name });
-  if (sv && pn && sv.kuerzel === pn.kuerzel && !((e.cfg && e.cfg.personen) || {})[sv.kuerzel] && !zugestellt)
+  if (u2 && (!u1 || u2.kuerzel !== u1.kuerzel)) unterschriften.push({ kuerzel: u2.kuerzel, rolle: rollentext(u2), name: u2.name });
+  if (sv && pn && sv.kuerzel === pn.kuerzel && !f.rolle1 && !((e.cfg && e.cfg.personen) || {})[sv.kuerzel] && !zugestellt)
     hinweise.push(`${sv.name} hat die Proben genommen und unterschreibt als Sachverständige(r) – Rolle in den Einstellungen noch nicht festgelegt (Messtechniker?).`);
-  if (sv && sv.rolle === 'mt') hinweise.push(`${sv.name} ist in den Einstellungen als Messtechniker eingetragen, unterschreibt hier aber als Sachverständige(r).`);
   [sv, pn, mt].filter((p, i, xs) => p && xs.findIndex(q => q && q.kuerzel === p.kuerzel) === i).forEach(p => { if (!p.geschlecht) hinweise.push(`${p.name}: in den Einstellungen fehlt Frau/Herr.`); });
   // Anlagen: „Anlage n:“ | Prüfbericht Nr. … / (Labor) – zweizeilig mit hängendem Einzug; anlagen = dieselben Angaben als Fließtext
   const anlagenTeile = (berichtNr.length ? berichtNr : ['']).map((nr, i) =>
@@ -366,7 +382,7 @@ function bericht(eingabe) {
   const modell = {
     dateiname: `${+f.mitteilung || 1}._Mitteilung_${P.nr || 'Projekt'}.docx`,
     deckblatt: { titel: `Untersuchungsbericht vom ${datum}`, mitteilung, projektnummer: P.nr, betreff: betreffRuns, felder },
-    kopf, kennzeilen, abschnitte, ortDatum: `Würselen, ${datum}`, unterschriften, anlagen, anlagenTeile, anlagenDateien, proben, offen,
+    kopf, kennzeilen, abschnitte, ortDatum: `Würselen, ${datum}`, unterschriften, versicherungsfall: vfall, anlagen, anlagenTeile, anlagenDateien, proben, offen,
     hinweise: [...new Set(hinweise)], sperren, probenehmerQuelle,
   };
   modell.luecken = luecken(modell);
@@ -397,7 +413,7 @@ function luecken(m) {
 /** Runs → reiner Text (Lücken in eckigen Klammern) */
 const text = runs => (Array.isArray(runs) ? runs : [runs]).map(r => (r && typeof r === 'object' ? r.gap : String(r == null ? '' : r))).join('');
 
-const API = { VERSION: 1, bericht, alsEntwurf, beschreibungKey, beschreibungWeichtAb, asbestBefund, kmfWerte, person, rollentext, namensteile, datumDE, zeilen, liste, zahlwort, probenSammeln, projektSicht, text, mitArtikel, objektImSatz };
+const API = { VERSION: 1, bericht, istVersicherer, alsEntwurf, beschreibungKey, beschreibungWeichtAb, asbestBefund, kmfWerte, person, rollentext, namensteile, datumDE, zeilen, liste, zahlwort, probenSammeln, projektSicht, text, mitArtikel, objektImSatz };
 if (typeof module === 'object' && module.exports) module.exports = API;
 root.BerichtText = API;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

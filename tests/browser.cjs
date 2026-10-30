@@ -105,6 +105,23 @@ const daten = {
     assert.match(v, /Der Dämmstoff wurde vor 1996 eingebaut/);
     assert.match(v, /Die Sachverständige.*Dr\. Tanja Test/s); assert.match(v, /Der Messtechniker.*Max Messer/s);
     assert.doesNotMatch(await page.textContent('#hinweise'), /Lücke im Bericht/);
+    // „als …“ je Unterschrift: folgt den Einstellungen, für diesen Bericht änderbar; Messtechniker darf allein unterschreiben
+    const vs = () => page.textContent('#vorschau');
+    assert.equal(await page.inputValue('#fR1'), 'sv'); assert.equal(await page.inputValue('#fR2'), 'mt');
+    await page.selectOption('#fSv', 'Mes'); assert.equal(await page.inputValue('#fR1'), 'mt');
+    assert.match(await vs(), /Der Messtechniker.*Max Messer/s); assert.doesNotMatch(await vs(), /Die Sachverständige/);
+    await page.selectOption('#fSv', 'Tst'); await page.selectOption('#fR1', 'mt');
+    assert.match(await vs(), /Die Messtechnikerin.*Dr\. Tanja Test/s);
+    await page.selectOption('#fR1', 'sv'); assert.match(await vs(), /Die Sachverständige.*Dr\. Tanja Test/s);
+    // Deckblatt mit/ohne Versicherung: automatisch (Auftraggeber ist eine Versicherung), umstellbar, zurück auf automatisch
+    assert.ok(await page.isChecked('input[name=deckblatt][value=versicherung]'));
+    assert.equal(await page.textContent('#qDeckblatt'), 'automatisch: Auftraggeber ist eine Versicherung');
+    assert.ok(await page.isVisible('#fVers')); assert.match(await vs(), /Versicherer:/);
+    await page.check('input[name=deckblatt][value=direkt]');
+    assert.ok(!(await page.isVisible('#fVers'))); assert.doesNotMatch(await vs(), /Versicherer:/); assert.match(await vs(), /Auftraggeber:/);
+    assert.equal(await page.textContent('#qDeckblatt'), 'selbst gewählt');
+    await page.click('#btnDeckblattAuto');
+    assert.ok(await page.isChecked('input[name=deckblatt][value=versicherung]')); assert.ok(!(await page.isVisible('#btnDeckblattAuto')));
 
     if (process.env.BERICHT_AUSGABE) { await page.setViewportSize({ width: 1440, height: 1000 }); await page.evaluate(() => window.scrollTo(0, 0)); await page.waitForSelector('#mosaikLeiste .ml-step'); await page.screenshot({ path: path.join(process.env.BERICHT_AUSGABE, 'oberflaeche.png'), fullPage: false }); }
     // Probe abwählen und wieder an
