@@ -3,9 +3,10 @@
    Schreibt nur: die Word-Datei in „Mitteilungen“ und – über „Einstellungen“ – _Spektron-BerichtKit.json im Archivordner.
    Laborwerte und Probenbezeichnungen werden nie bearbeitet; fehlende Angaben erscheinen im Bericht gelb markiert. */
 'use strict';
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 const APP_DATE = '30.10.2026';
 const CHANGELOG = [
+  ['1.1.0', '30.10.2026', 'Teil der Spektron-Suite: Spektron-Leiste oben (Projekt, Arbeitsschritte, Weiter), Angaben zum Bericht gemeinsam für alle im Projektordner („_Spektron/BerichtKit/_BerichtKit.json“, ältere Projekte „Mitteilungen“), offline nutzbar.'],
   ['1.0.0', '30.10.2026', 'Erste Fassung: Asbest-Untersuchungsbericht (Mitteilung) aus Projektzentrale, LabelKit, ResultKit und FotoKit – Vorschau, Lücken gelb, Word-Datei in „Mitteilungen“.'],
 ];
 const SO = globalThis.SpektronOrdner, T = globalThis.BerichtText;
@@ -55,6 +56,12 @@ const heute = () => { const d = new Date(); return `${d.getFullYear()}-${String(
 /* ---------- Start ---------- */
 async function start() {
   $('version').textContent = 'v' + APP_VERSION;
+  if (!start.einmal) {
+    start.einmal = true;
+    if (window.MosaikLeiste) MosaikLeiste.start('bericht', { version: APP_VERSION });
+    // offline nutzbar wie die Projektzentrale; nicht beim lokalen Testserver (127.0.0.1), damit Tests immer die aktuelle Fassung laden
+    if (/^https?:$/.test(location.protocol) && location.hostname !== '127.0.0.1' && 'serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
   $('version').title = CHANGELOG.map(c => `${c[0]} (${c[1]}): ${c[2]}`).join('\n');
   document.title = `BerichtKit ${APP_VERSION} · Spektron`;
   if (!('showDirectoryPicker' in window)) { zeigeStart('BerichtKit braucht Edge oder Chrome (Zugriff auf Ordner).', false); $('btnWaehlen').disabled = true; return; }
@@ -141,6 +148,7 @@ async function oeffnen(dir) {
   }
   S.laedt = false;
   render();
+  if (window.MosaikLeiste) MosaikLeiste.aktualisieren();
 }
 async function archivLesen() {
   S.mitarbeiter = []; S.cfg = { personen: {} }; S.cfgText = null; S.sig = {};
@@ -208,10 +216,55 @@ async function formStart() {
   const vorgabe = { datum: heute(), mitteilung: await naechsteMitteilung(), variante: 'eigen', eingangsdatum: '', auftragsdatum: P.auftragsdatum,
     agSatz: T.zeilen(P.ag)[0] || '', probenehmer: pn, sv, mt: pn && rolle(pn) === 'mt' ? pn : '', labor: S.cfg.labor || '', einbau: 'unbekannt',
     aus: {}, kmf: {}, who: {}, ki: {}, foto: {} };
-  S.form = { ...vorgabe, ...gespeichert };
-  S.formKey = key;
+  S.formKey = key; S.zustand = { text: null, geplant: 0, warte: null, berichte: [] };
+  const geteilt = await zustandLesen().catch(e => { S.quellen.push({ ok: false, text: 'Angaben zum Bericht nicht lesbar: ' + (e && e.message || e) }); return null; });
+  if (geteilt) S.quellen.push({ ok: true, text: 'Angaben zum Bericht aus dem Projektordner' + (geteilt.von ? ` (zuletzt ${geteilt.von})` : '') });
+  S.form = { ...vorgabe, ...(geteilt ? geteilt.form : gespeichert) };
+  if (!geteilt && Object.keys(gespeichert).length) zustandPlanen();   // frühere Angaben aus diesem Browser einmal in den Projektordner übernehmen
 }
-function formMerken() { try { localStorage.setItem(S.formKey, JSON.stringify(S.form)); } catch (e) { /* voll/gesperrt */ } }
+/* ---------- Angaben zum Bericht – gemeinsam im Projektordner (Bereich „berichtkit“ in spektron-ordner.js) ----------
+   { format:'spektron-bericht', version:1, projekt, form:{…}, berichte:[{datei, am, von}], geaendert, geaendertVon, geaendertMit }
+   Frisch lesen → nur schreiben, wenn die Datei seit dem letzten Lesen/Schreiben unverändert ist → zurücklesen.
+   Hat ein Kollege inzwischen gespeichert, gilt sein Stand (wird geladen und gemeldet) – nichts wird stumm überschrieben. */
+const ZUSTAND_DATEI = '_BerichtKit.json';
+const ich = () => { try { return (localStorage.getItem('spektron-ich') || '').trim(); } catch (e) { return ''; } };
+function zustandAus(text) {
+  const d = JSON.parse(text);
+  if (!d || d.format !== 'spektron-bericht' || d.version !== 1 || typeof d.form !== 'object') throw new Error(`${ZUSTAND_DATEI} hat ein unbekanntes Format.`);
+  return d;
+}
+async function zustandLesen() {
+  const o = await SO.ort(S.dir, 'berichtkit');
+  if (!o.dir) return null;
+  const r = await leseJson(o.dir, ZUSTAND_DATEI); if (!r) return null;
+  const d = zustandAus(r.text); S.zustand.text = r.text; S.zustand.berichte = Array.isArray(d.berichte) ? d.berichte : [];
+  return { form: d.form, von: d.geaendertVon || '' };
+}
+function formMerken() { try { localStorage.setItem(S.formKey, JSON.stringify(S.form)); } catch (e) { /* voll/gesperrt */ } zustandPlanen(); }
+function zustandPlanen() { clearTimeout(S.zustand.geplant); S.zustand.geplant = setTimeout(() => zustandSchreiben().catch(e => fehler('Angaben zum Bericht nicht gespeichert: ' + (e && e.message || e))), 900); }
+async function zustandSchreiben(bericht) {
+  const dir = S.dir; if (!dir) return;
+  const lauf = async () => {
+    const o = await SO.ort(dir, 'berichtkit', { anlegen: true });
+    if (!o.dir) throw new Error('Ablageort nicht verfügbar.');
+    const jetzt = await leseJson(o.dir, ZUSTAND_DATEI).catch(() => null);
+    if (jetzt && jetzt.text !== S.zustand.text) {   // ein Kollege war schneller: sein Stand gilt
+      const d = zustandAus(jetzt.text); S.zustand.text = jetzt.text; S.zustand.berichte = Array.isArray(d.berichte) ? d.berichte : [];
+      S.form = { ...S.form, ...d.form }; formLokal();
+      $('status').textContent = `Angaben zum Bericht wurden inzwischen ${d.geaendertVon ? 'von ' + d.geaendertVon + ' ' : ''}geändert – dieser Stand ist jetzt geladen.`;
+      render(); if (!bericht) return;
+    }
+    if (bericht) S.zustand.berichte = [...S.zustand.berichte, bericht].slice(-50);
+    const daten = { format: 'spektron-bericht', version: 1, hinweis: 'Angaben von BerichtKit zum Bericht dieses Projekts – nicht von Hand bearbeiten.',
+      projekt: S.ordner.nr || '', form: S.form, berichte: S.zustand.berichte, geaendert: new Date().toISOString(), geaendertVon: ich(), geaendertMit: 'BerichtKit ' + APP_VERSION };
+    const text = JSON.stringify(daten, null, 1);
+    const fh = await o.dir.getFileHandle(ZUSTAND_DATEI, { create: true }), w = await fh.createWritable(); await w.write(text); await w.close();
+    if (await (await fh.getFile()).text() !== text) throw new Error('Zurücklesen stimmt nicht.');
+    S.zustand.text = text;
+  };
+  return navigator.locks ? navigator.locks.request('berichtkit:projekt:' + dir.name, lauf) : lauf();
+}
+function formLokal() { try { localStorage.setItem(S.formKey, JSON.stringify(S.form)); } catch (e) { /* voll/gesperrt */ } }
 
 /* ---------- Modell ---------- */
 function modell() {
@@ -282,7 +335,7 @@ function vorschau(m) {
   const d = m.deckblatt;
   const deck = `<div class="blatt"><p class="titel">${esc(d.titel)}</p><p class="mitt">(${esc(d.mitteilung)})</p>
     <div class="zeile"><span>Projektnummer:</span><span>${runsHtml(d.projektnummer || { gap: '[Projektnummer]' })}</span></div>
-    <div class="zeile"><span>${runsHtml(d.betreff)}</span></div>
+    <p style="margin:0 0 12px;text-align:left;line-height:1.35">${runsHtml(d.betreff)}</p>
     ${d.felder.map(([k, v]) => `<div class="zeile"><span>${esc(k)}</span><span>${v.map(runsHtml).join('<br>')}</span></div>`).join('')}</div>`;
   const teile = [`<div class="kopfzeilen">${m.kopf.map(runsHtml).join('<br>')}</div>`];
   for (const a of m.abschnitte) {
@@ -360,6 +413,9 @@ async function speichern() {
     await w.write(blob); await w.close();
     const zurueck = await (await fh.getFile()).arrayBuffer();
     if (zurueck.byteLength !== blob.size) throw new Error('Gespeicherte Datei ist unvollständig – bitte erneut versuchen.');
+    clearTimeout(S.zustand.geplant);
+    await zustandSchreiben({ datei: name, am: new Date().toISOString(), von: ich() }).catch(e => fehler('Bericht gespeichert, Angaben dazu nicht: ' + (e && e.message || e)));
+    if (window.MosaikLeiste) MosaikLeiste.aktualisieren();
     $('status').innerHTML = `<span class="ok">✓ Gespeichert: Mitteilungen/${esc(name)}</span>` + (fehlen.length ? ` · Foto(s) nicht lesbar: ${esc(fehlen.join(', '))}` : '');
   } catch (e) {
     $('status').textContent = ''; fehler('Speichern fehlgeschlagen: ' + (e && e.message || e));
