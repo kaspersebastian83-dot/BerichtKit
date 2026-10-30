@@ -104,13 +104,21 @@ function namensteile(name) {
   const nachname = w.length > 1 ? w.slice(1).join(' ') : (w[0] || '');
   return { titel: titel.filter(t => /^(Dr\.|Prof\.)$/.test(t)).join(' '), nachname };
 }
+/* Frau/Herr ohne Eintrag in den Einstellungen: Büro-Standard nach Nachname (Basti, 30.10.2026).
+   Ein Eintrag in den Einstellungen geht immer vor; Unbekannte bleiben leer (Hinweis „fehlt Frau/Herr“). */
+const ANREDE_STANDARD = { 'pütt': 'w', 'jung': 'w', 'kasper': 'm', 'grund': 'm', 'cremer': 'm', 'vom dorp': 'm' };
+/** 'w' | 'm' | '' für einen Namen laut Büro-Standard */
+function anredeStandard(name) {
+  const nn = s(namensteile(name).nachname).normalize('NFC').toLowerCase();
+  return ANREDE_STANDARD[nn] || '';
+}
 /** Person für Bericht: {kuerzel, name, rolle:'sv'|'mt', geschlecht:'w'|'m'|'', satz} */
 function person(cfg, mitarbeiter, kuerzel) {
   const k = s(kuerzel); if (!k) return null;
   const ma = (mitarbeiter || []).find(p => s(p.ordnerKuerzel).toLowerCase() === k.toLowerCase()) || {};
   const c = ((cfg && cfg.personen) || {})[k] || {};
   const name = s(c.name) || s(ma.name) || k;
-  const g = c.geschlecht === 'w' || c.geschlecht === 'm' ? c.geschlecht : '';
+  const g = c.geschlecht === 'w' || c.geschlecht === 'm' ? c.geschlecht : anredeStandard(name);
   const t = namensteile(name);
   const satz = s(c.satz) || (g ? `${g === 'w' ? 'Frau' : 'Herrn'} ${t.titel ? t.titel + ' ' : ''}${t.nachname}` : name);
   return { kuerzel: k, name, rolle: c.rolle === 'mt' ? 'mt' : 'sv', geschlecht: g, satz };
@@ -121,6 +129,17 @@ function rollentext(p) {
 }
 
 /* ---------- Proben zusammenführen ---------- */
+/* LabelKit-Matrix (Auswahl für die Nachweisgrenze nach VDI 3866-5) → Materialname für den Bericht (Einzahl, ohne Markennamen).
+   Nur Ersatz, wenn „Bauteil / Material“ (z3) leer ist – die Matrix ist eine Laborgruppe, z3 das konkrete Material. */
+const MATRIX_MATERIAL = {
+  'Faserzementprodukte (z.B. Eternit)': 'Faserzement', 'Promabest (Leichtbauplatten)': 'Leichtbauplatte', 'Pappen': 'Pappe',
+  'Schnüre': 'Schnur', 'Dichtungen': 'Dichtung', 'Cushion-Vinyl (Bodenbelag)': 'Cushion-Vinyl-Bodenbelag',
+  'Fußbodenplatten (Flexplatten)': 'Fußbodenplatte (Flexplatte)', 'Rohrisolierungen (Diatomeen-Basis)': 'Rohrisolierung (Diatomeen-Basis)',
+  'KMF-Deckenplatten': 'KMF-Deckenplatte', 'Bituminöse Proben / Kleber': 'bituminöses Material / Kleber', 'Kitte': 'Kitt',
+  'Rohrisolierungen (Gips-Basis)': 'Rohrisolierung (Gips-Basis)', 'Farben': 'Farbe', 'Estriche': 'Estrich',
+  'Ausgleichsmassen': 'Ausgleichsmasse', 'Putze / Spachtelmassen': 'Putz / Spachtelmasse',
+};
+const matrixMaterial = m => MATRIX_MATERIAL[s(m).normalize('NFC')] || '';
 /** LabelKit-Asbestproben nach Label „P<n>“ (Nummer wie LabelKit: _nr, sonst id) */
 function labelkitAsbest(lk) {
   const m = new Map();
@@ -148,7 +167,8 @@ function probenSammeln(erg, lk) {
     const abgleich = { labelkit: a ? tidy(a.desc) : '', bericht: tidy(p.desc), auftrag: !!auftrag };
     abgleich.ok = abgleich.labelkit && abgleich.bericht ? !beschreibungWeichtAb(a.desc, p.desc, s(p.art)) : null;
     out.push({ label, nr: l.nr || PNR(p.ref) || PNR(label), ref: s(p.ref), labNr: s(p.labNr), bericht: s(b.bericht || p.bericht),
-      stelle: l.stelle || s(p.raum) || '', material: l.material || '', matrix: l.matrix || s(p.art),
+      stelle: l.stelle || s(p.raum) || '', material: l.material || matrixMaterial(l.matrix), materialAusMatrix: !l.material && !!matrixMaterial(l.matrix),
+      matrix: l.matrix || s(p.art),
       datum: l.datum || s(p.datum), befund, kmf, vorlaeufig: !!b.vorlaeufig, abgleich });
   }
   out.sort((a, b) => (a.nr || 0) - (b.nr || 0));
@@ -219,6 +239,7 @@ function bericht(eingabe) {
     if (p.abgleich.ok === false) (ABGLEICH_SPERRT ? sperren : hinweise).push(`${p.ref || p.label}: Entnahmestelle passt nicht – LabelKit „${p.abgleich.labelkit}“, Prüfbericht ${p.bericht} „${p.abgleich.bericht}“ → in LabelKit oder beim Labor klären.`);
     if (p.befund && !p.befund.eindeutig) hinweise.push(`${p.ref || p.label}: Ergebnis „${p.befund.text}“ nicht eindeutig – bitte im Prüfbericht prüfen.`);
     if (!p.material) hinweise.push(`${p.ref || p.label}: Material fehlt (LabelKit „Bauteil / Material“).`);
+    else if (p.materialAusMatrix) hinweise.push(`${p.ref || p.label}: Material „${p.material}“ aus der LabelKit-Matrix übernommen – „Bauteil / Material“ ist leer; genauer wäre z. B. „Fliesenkleber“.`);
     if (p.istKmf && !p.ki) hinweise.push(`${p.ref || p.label}: KI-Wert fehlt in den Labordaten – bitte aus dem Prüfbericht eintragen.`);
   });
   const ohneAbgleich = proben.filter(p => p.abgleich.ok === null);
@@ -319,7 +340,8 @@ function bericht(eingabe) {
   /* 3. Befund */
   const tab = { t: 'tab', caption: `Tabelle 1: ${zugestellt ? 'Zugestellte' : 'Entnommene'} ${eine ? 'Probe und Ergebnis' : 'Proben und Ergebnisse'}`,
     kopf: ['Probe', 'Labor-Nr.', 'Entnahmestelle', 'Material', 'Ergebnis'],
-    zeilen: proben.map(p => [p.ref || p.label, p.labNr, p.stelle, p.material, p.befund ? p.befund.text : '–']) };
+    ausrichtung: ['center', 'center', 'left', 'left', 'left'],   // gilt auch für den Spaltenkopf
+    zeilen: proben.map(p => [p.nr ? String(p.nr) : (p.ref || p.label), p.labNr, p.stelle, p.material, p.befund ? p.befund.text : '–']) };
   const bf = [tab];
   if (pos.length === 0 && unklar.length === 0 && n) {
     bf.push({ t: 'p', runs: [eine ? 'In der Probe wurde kein Asbest nachgewiesen (Tabelle 1).' : `In keiner der ${zahlwort(n)} Proben wurde Asbest nachgewiesen (Tabelle 1).`] });
@@ -423,7 +445,7 @@ function luecken(m) {
 /** Runs → reiner Text (Lücken in eckigen Klammern) */
 const text = runs => (Array.isArray(runs) ? runs : [runs]).map(r => (r && typeof r === 'object' ? r.gap : String(r == null ? '' : r))).join('');
 
-const API = { VERSION: 1, bericht, istVersicherer, alsEntwurf, beschreibungKey, beschreibungWeichtAb, asbestBefund, kmfWerte, person, rollentext, namensteile, datumDE, zeilen, liste, zahlwort, probenSammeln, projektSicht, projektNummer, gleichesProjekt, text, mitArtikel, objektImSatz };
+const API = { VERSION: 1, bericht, istVersicherer, alsEntwurf, beschreibungKey, beschreibungWeichtAb, asbestBefund, kmfWerte, person, anredeStandard, rollentext, namensteile, matrixMaterial, datumDE, zeilen, liste, zahlwort, probenSammeln, projektSicht, projektNummer, gleichesProjekt, text, mitArtikel, objektImSatz };
 if (typeof module === 'object' && module.exports) module.exports = API;
 root.BerichtText = API;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

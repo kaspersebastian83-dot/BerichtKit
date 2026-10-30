@@ -10,11 +10,11 @@ Adresse: `https://kaspersebastian83-dot.github.io/berichtkit/` · aus der Projek
 | Im Bericht | Quelle | Datei |
 |---|---|---|
 | Deckblatt (VN/Auftraggeber, Risiko/Schadenort, Versicherer, Schaden-Nr.), Auftragsdatum | Projektzentrale | `_Projekt.json` – „mit Versicherung“, wenn `versicherer` eingetragen ist oder (bei eingetragenem VN) der Auftraggeber eine Versicherung ist, sonst „ohne“; im Bericht unter „Auftrag“ umstellbar. Versicherer: `versicherer`, sonst der Auftraggeber (als „angenommen“ angezeigt) |
-| Proben: Entnahmestelle, Material, Probenahmedatum; Probenehmer (Feldbogen, nur genauer Name) | LabelKit (Asbest-Tabelle) | `*_Daten.json` – die Datei, die ResultKit übernommen hat (`auftrag.quelle`), sonst die neueste |
+| Proben: Entnahmestelle, Material (`z3`, leer → aus der Matrix), Probenahmedatum; Probenehmer (Feldbogen, nur genauer Name) | LabelKit (Asbest-Tabelle) | `*_Daten.json` – die Datei, die ResultKit übernommen hat (`auftrag.quelle`), sonst die neueste |
 | Ergebnis, Labor-Nr., Prüfbericht-Nr., KI-Wert (falls im XML) | ResultKit | `_Ergebnisse.json` |
 | Fotos zu den Proben (Probe-Nr. in FotoKit) | FotoKit | `_Bildumbenenner.json` + `Fotos/` |
 | Namen | Projektzentrale | `<Archiv>/_Spektron-Mitarbeiter.json` |
-| Rollen, Frau/Herr, Labor | BerichtKit „Einstellungen“ | `<Archiv>/_Spektron-BerichtKit.json` – die Rolle („als Sachverständige(r)“/„als Messtechniker(in)“) ist je Unterschrift vorgewählt und im Bericht änderbar |
+| Rollen, Frau/Herr (ohne Eintrag: Büro-Standard nach Nachname), Labor | BerichtKit „Einstellungen“ | `<Archiv>/_Spektron-BerichtKit.json` – die Rolle („als Sachverständige(r)“/„als Messtechniker(in)“) ist je Unterschrift vorgewählt und im Bericht änderbar |
 | Unterschriften | von Hand abgelegt | `<Archiv>/_Spektron-Unterschriften/<Kürzel>.png` |
 | Angaben zum Bericht (Variante, Daten, Personen, Auswahl der Proben und Fotos) | BerichtKit, gemeinsam für alle | `_Spektron/BerichtKit/_BerichtKit.json` (Vor Spektron: `Mitteilungen/`) |
 
