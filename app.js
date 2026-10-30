@@ -6,7 +6,7 @@
 const APP_VERSION = '1.2.0';
 const APP_DATE = '30.10.2026';
 const CHANGELOG = [
-  ['1.2.0', '30.10.2026', 'Feinschliff nach dem ersten echten Bericht (26.0512): Versicherer als eigenes Feld – ist der Auftraggeber der VN selbst, erscheint er nicht mehr als Versicherer, sondern als Lücke; Auftraggeber im Satz mit Artikel („durch die … eG“); Lage wie „2. OG rechts“ im Text hinter der Adresse in Klammern; Labor-Nr. in Tabelle 1 ohne Umbruch; Hinweis, wenn der Probenehmer ohne festgelegte Rolle als Sachverständige(r) unterschreibt.'],
+  ['1.2.0', '30.10.2026', 'Feinschliff nach dem ersten echten Bericht (26.0512): Versicherer als eigenes Feld – ist der Auftraggeber der VN selbst, erscheint er nicht mehr als Versicherer, sondern als Lücke; Auftraggeber im Satz mit Artikel („durch die … eG“); Lage wie „2. OG rechts“ im Text hinter der Adresse in Klammern; Labor-Nr. in Tabelle 1 ohne Umbruch; Hinweis, wenn der Probenehmer ohne festgelegte Rolle als Sachverständige(r) unterschreibt; Anlagen zweizeilig mit hängendem Einzug (Laborname bündig unter der Prüfbericht-Nr.).'],
   ['1.1.0', '30.10.2026', 'Teil der Spektron-Suite: Spektron-Leiste oben (Projekt, Arbeitsschritte, Weiter), Knopf „📘 Handbuch“ (AidKit-Kapitel „BerichtKit Schritt für Schritt“), Angaben zum Bericht gemeinsam für alle im Projektordner („_Spektron/BerichtKit/_BerichtKit.json“, ältere Projekte „Mitteilungen“), offline nutzbar.'],
   ['1.0.0', '30.10.2026', 'Erste Fassung: Asbest-Untersuchungsbericht (Mitteilung) aus Projektzentrale, LabelKit, ResultKit und FotoKit – Vorschau, Lücken gelb, Word-Datei in „Mitteilungen“.'],
 ];
@@ -402,7 +402,8 @@ function vorschau(m) {
   teile.push(`<p style="margin-top:20px">${esc(m.ortDatum)}</p><div class="sig">${m.unterschriften.map(u => {
     const b = u.kuerzel && S.sig[u.kuerzel.toLowerCase()];
     return `<div><div class="linie">${b ? `<img src="${b.url}" alt="">` : ''}</div>${runsHtml(u.rolle)}<br>${runsHtml(u.name)}</div>`; }).join('')}</div>`);
-  teile.push(`<p style="margin-top:28px;text-align:left">${m.anlagen.map(runsHtml).join('<br>')}</p>`);
+  teile.push(`<div style="margin-top:28px;display:grid;grid-template-columns:auto 1fr;column-gap:.7em;row-gap:.5em;text-align:left">${(m.anlagenTeile || [])
+    .map(a => `<div>${esc(a.label)}</div><div>${a.zeilen.map(runsHtml).join('<br>')}</div>`).join('')}</div>`);
   $('vorschau').innerHTML = deck + `<div class="blatt">${teile.join('')}</div>`;
   vorschauBilder();
 }

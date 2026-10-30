@@ -69,6 +69,9 @@ fall('Gemischt: zwei positiv, eine negativ; zwei Prüfberichte → Anlagen 1 und
   assert.match(t, /Bei den Materialien „Wellplatte“ \(Probe 1\) und „Floor-Flex-Platte“ \(Probe 3\) handelt es sich um asbesthaltige Materialien\. Bei allen Tätigkeiten, bei denen diese Materialien bearbeitet, beschädigt oder entfernt werden/);
   assert.match(t, /Bei dem übrigen untersuchten Material handelt es sich nicht um ein asbesthaltiges Material\./);
   assert.equal(m.anlagen.length, 2);
+  assert.deepEqual(m.anlagenTeile.map(x => x.label), ['Anlage 1:', 'Anlage 2:']);
+  assert.deepEqual(m.anlagenTeile[1].zeilen.map(T.text), ['Prüfbericht Nr. AR-999-2026-000002-01', '(Eurofins Beispiel-Labor GmbH)']);
+  assert.equal(T.text(m.anlagen[0]), 'Anlage 1: Prüfbericht Nr. AR-999-2026-000001-01 (Eurofins Beispiel-Labor GmbH)');
 });
 
 fall('KMF: KI aus Labordaten, WHO-Fasern, Einbaujahr unbekannt / vor 1996', () => {

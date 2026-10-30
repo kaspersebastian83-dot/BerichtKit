@@ -307,8 +307,10 @@ function bericht(eingabe) {
     hinweise.push(`${sv.name} hat die Proben genommen und unterschreibt als Sachverständige(r) – Rolle in den Einstellungen noch nicht festgelegt (Messtechniker?).`);
   if (sv && sv.rolle === 'mt') hinweise.push(`${sv.name} ist in den Einstellungen als Messtechniker eingetragen, unterschreibt hier aber als Sachverständige(r).`);
   [sv, pn, mt].filter((p, i, xs) => p && xs.findIndex(q => q && q.kuerzel === p.kuerzel) === i).forEach(p => { if (!p.geschlecht) hinweise.push(`${p.name}: in den Einstellungen fehlt Frau/Herr.`); });
-  const anlagen = (berichtNr.length ? berichtNr : ['']).map((nr, i) =>
-    [`Anlage ${i + 1}: Prüfbericht Nr. `, L(nr, 'Prüfbericht-Nr.'), ' (', L(labor, 'Labor'), ')']);
+  // Anlagen: „Anlage n:“ | Prüfbericht Nr. … / (Labor) – zweizeilig mit hängendem Einzug; anlagen = dieselben Angaben als Fließtext
+  const anlagenTeile = (berichtNr.length ? berichtNr : ['']).map((nr, i) =>
+    ({ label: `Anlage ${i + 1}:`, zeilen: [['Prüfbericht Nr. ', L(nr, 'Prüfbericht-Nr.')], ['(', L(labor, 'Labor'), ')']] }));
+  const anlagen = anlagenTeile.map(a => [a.label + ' ', ...a.zeilen[0], ' ', ...a.zeilen[1]]);
 
   const abschnitte = [
     { titel: '1. Veranlassung', inhalt: v },
@@ -319,7 +321,7 @@ function bericht(eingabe) {
   const modell = {
     dateiname: `${+f.mitteilung || 1}._Mitteilung_${P.nr || 'Projekt'}.docx`,
     deckblatt: { titel: `Untersuchungsbericht vom ${datum}`, mitteilung, projektnummer: P.nr, betreff: betreffRuns, felder },
-    kopf, abschnitte, ortDatum: `Würselen, ${datum}`, unterschriften, anlagen, proben, hinweise,
+    kopf, abschnitte, ortDatum: `Würselen, ${datum}`, unterschriften, anlagen, anlagenTeile, proben, hinweise,
   };
   modell.luecken = luecken(modell);
   return modell;

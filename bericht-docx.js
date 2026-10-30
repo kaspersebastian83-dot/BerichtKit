@@ -108,6 +108,7 @@ function erstellen(D, m, bilder) {
     const b = u.kuerzel && bilder.sig && bilder.sig[u.kuerzel];
     const bild = b ? [new ImageRun({ type: 'png', data: b.data, transformation: { width: cmPx(Math.min(5, SIG_H * b.w / b.h)), height: cmPx(Math.min(5, SIG_H * b.w / b.h) * b.h / b.w) } })] : [];
     return new TableCell({ width: { size: B / 2, type: WidthType.DXA }, borders: { top: NONE, bottom: NONE, left: NONE, right: NONE }, verticalAlign: VerticalAlign.BOTTOM,
+      margins: { left: 0, right: 0 },   // Unterschriftslinie und Text bündig mit dem Textrand
       children: [
         new Paragraph({ children: bild, border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '000000', space: 1 } }, indent: { right: 900 },
           spacing: b ? { ...LINE1, after: 60 } : { before: Math.round(SIG_H / 2.54 * 1440), after: 60 } }),
@@ -119,7 +120,17 @@ function erstellen(D, m, bilder) {
   kinder.push(new Table({ width: { size: B, type: WidthType.DXA }, columnWidths: [B / 2, B / 2],
     borders: { top: NONE, bottom: NONE, left: NONE, right: NONE, insideHorizontal: NONE, insideVertical: NONE },
     rows: [new TableRow({ cantSplit: true, children: sig })] }));
-  m.anlagen.forEach((a, i) => kinder.push(einfach(runs(a), { spacing: { ...LINE1, before: i ? 0 : 960, after: 0 } })));
+  /* Anlagen: „Anlage 1:“ ⇥ Prüfbericht Nr. …  ↵  (Labor) – Folgezeile bündig unter dem Text (hängender Einzug),
+     jede Anlage bleibt zusammen, alle Anlagen bleiben beieinander */
+  const ANL = 1276;                                 // 2,25 cm – reicht auch für „Anlage 10:“
+  const anlagen = m.anlagenTeile || m.anlagen.map(a => ({ label: '', zeilen: [a] }));
+  anlagen.forEach((a, i) => kinder.push(new Paragraph({
+    children: [...(a.label ? [t(a.label), t('\t')] : []), ...runs(a.zeilen[0]),
+      ...a.zeilen.slice(1).flatMap(z => [new TextRun({ font: FONT, break: 1 }), ...runs(z)])],
+    tabStops: [{ type: TabStopType.LEFT, position: ANL }], indent: a.label ? { left: ANL, hanging: ANL } : undefined,
+    keepLines: true, keepNext: i < anlagen.length - 1,
+    spacing: { ...LINE1, before: i ? 0 : 960, after: i < anlagen.length - 1 ? 200 : 0 },
+  })));
 
   const seite = top => ({ size: { width: 11906, height: 16838 }, margin: { top, right: 1418, bottom: 1134, left: 1418, header: 720, footer: 720 } });
   return new Document({
