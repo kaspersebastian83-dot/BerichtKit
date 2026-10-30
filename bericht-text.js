@@ -141,6 +141,18 @@ const MATRIX_MATERIAL = {
   'Ausgleichsmassen': 'Ausgleichsmasse', 'Putze / Spachtelmassen': 'Putz / Spachtelmasse',
 };
 const matrixMaterial = m => MATRIX_MATERIAL[s(m).normalize('NFC')] || '';
+/* Raum-Kürzel aus LabelKit („SZ“, „WZ“) sind für den Auftraggeber nicht selbsterklärend (Testbericht 26.0512, 30.10.2026).
+   Im Bericht (Tabelle 1, Abb.-Unterschriften) werden nur diese eindeutigen Kürzel ausgeschrieben – als ganzes Wort, genau so
+   geschrieben. Geschosse (OG, EG …) bleiben. Nicht dabei: AZ (im Asbestbericht = Asbestzement, „AZ-Rohr“), EZ (mehrdeutig). Jede Ersetzung erscheint als Hinweis; LabelKit, Abgleich und Prüfbericht bleiben unberührt. */
+const RAUM_KUERZEL = { SZ: 'Schlafzimmer', WZ: 'Wohnzimmer', KiZ: 'Kinderzimmer', GZ: 'Gästezimmer',
+  HWR: 'Hauswirtschaftsraum', TRH: 'Treppenhaus' };
+const RAUM_RE = new RegExp(`(?<![\\p{L}\\p{N}])(${Object.keys(RAUM_KUERZEL).join('|')})(?![\\p{L}\\p{N}])`, 'gu');
+/** „Bodenaufbau SZ Unterseite“ → { text: „Bodenaufbau Schlafzimmer Unterseite“, ersetzt: ['SZ'] } */
+function raumAusschreiben(v) {
+  const ersetzt = [];
+  const text = s(v).replace(RAUM_RE, k => { ersetzt.push(k); return RAUM_KUERZEL[k]; });
+  return { text, ersetzt };
+}
 /** LabelKit-Asbestproben nach Label „P<n>“ (Nummer wie LabelKit: _nr, sonst id) */
 function labelkitAsbest(lk) {
   const m = new Map();
@@ -244,6 +256,10 @@ function bericht(eingabe) {
     else if (p.materialAusMatrix) hinweise.push(`${p.ref || p.label}: Material „${p.material}“ aus der LabelKit-Matrix übernommen – „Bauteil / Material“ ist leer; genauer wäre z. B. „Fliesenkleber“.`);
     if (p.istKmf && !p.ki) hinweise.push(`${p.ref || p.label}: KI-Wert fehlt in den Labordaten – bitte aus dem Prüfbericht eintragen.`);
   });
+  // Raum-Kürzel nur für den Berichtstext ausschreiben (p.stelle bleibt der LabelKit-Text)
+  const kuerzel = new Set();
+  proben.forEach(p => { const r = raumAusschreiben(p.stelle); p.stelleBericht = r.text; r.ersetzt.forEach(k => kuerzel.add(k)); });
+  if (kuerzel.size) hinweise.push(`Entnahmestelle: Abkürzungen ausgeschrieben (${[...kuerzel].map(k => `${k} → ${RAUM_KUERZEL[k]}`).join(', ')}) – im Prüfbericht stehen die Kürzel; bitte prüfen.`);
   const ohneAbgleich = proben.filter(p => p.abgleich.ok === null);
   if (ohneAbgleich.length) hinweise.push(`Entnahmestelle nicht mit dem Prüfbericht abgeglichen (${ohneAbgleich.map(p => p.label).join(', ')}): `
     + (ohneAbgleich.some(p => !p.abgleich.auftrag) ? 'ResultKit hat den LabelKit-Auftrag nicht gespeichert – in ResultKit die Ergebnisse erneut übernehmen.' : 'Beschreibung fehlt (z. B. nur PDF) – bitte selbst vergleichen.'));
@@ -345,13 +361,13 @@ function bericht(eingabe) {
   if (mitKmf) pr.push({ t: 'p', runs: [kmfProben.length === 1 ? 'An der Dämmstoffprobe wurde' : 'An den Dämmstoffproben wurde',
     ' zusätzlich untersucht, ob es sich um WHO-Fasern handelt, und der Kanzerogenitätsindex (KI) bestimmt.'] });
   mitFoto.forEach(p => pr.push({ t: 'fig', label: p.label, datei: p.foto,
-    caption: `Abb. ${abb.get(p.label)}: ${p.material || p.ref}${p.stelle ? ', ' + p.stelle : ''}.` }));
+    caption: `Abb. ${abb.get(p.label)}: ${p.material || p.ref}${p.stelleBericht ? ', ' + p.stelleBericht : ''}.` }));
 
   /* 3. Befund */
   const tab = { t: 'tab', caption: `Tabelle 1: ${zugestellt ? 'Zugestellte' : 'Entnommene'} ${eine ? 'Probe und Ergebnis' : 'Proben und Ergebnisse'}`,
     kopf: ['Probe', 'Labor-Nr.', 'Entnahmestelle', 'Material', 'Ergebnis'],
     ausrichtung: ['center', 'center', 'left', 'left', 'left'],   // gilt auch für den Spaltenkopf
-    zeilen: proben.map(p => [p.nr ? String(p.nr) : (p.ref || p.label), p.labNr, p.stelle, p.material, p.befund ? p.befund.text : '–']) };
+    zeilen: proben.map(p => [p.nr ? String(p.nr) : (p.ref || p.label), p.labNr, p.stelleBericht, p.material, p.befund ? p.befund.text : '–']) };
   const bf = [tab];
   if (pos.length === 0 && unklar.length === 0 && n) {
     bf.push({ t: 'p', runs: [eine ? 'In der Probe wurde kein Asbest nachgewiesen (Tabelle 1).' : `In keiner der ${zahlwort(n)} Proben wurde Asbest nachgewiesen (Tabelle 1).`] });
@@ -452,7 +468,7 @@ function luecken(m) {
 /** Runs → reiner Text (Lücken in eckigen Klammern) */
 const text = runs => (Array.isArray(runs) ? runs : [runs]).map(r => (r && typeof r === 'object' ? r.gap : String(r == null ? '' : r))).join('');
 
-const API = { VERSION: 1, bericht, istVersicherer, alsEntwurf, beschreibungKey, beschreibungWeichtAb, asbestBefund, kmfWerte, person, anredeStandard, rollentext, namensteile, matrixMaterial, datumDE, zeilen, liste, zahlwort, probenSammeln, projektSicht, projektNummer, gleichesProjekt, text, mitArtikel, objektImSatz };
+const API = { VERSION: 1, bericht, istVersicherer, alsEntwurf, beschreibungKey, beschreibungWeichtAb, asbestBefund, kmfWerte, person, anredeStandard, rollentext, namensteile, matrixMaterial, raumAusschreiben, datumDE, zeilen, liste, zahlwort, probenSammeln, projektSicht, projektNummer, gleichesProjekt, text, mitArtikel, objektImSatz };
 if (typeof module === 'object' && module.exports) module.exports = API;
 root.BerichtText = API;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

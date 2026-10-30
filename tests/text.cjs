@@ -296,4 +296,27 @@ fall('Tabelle 1: Probe nur als Nummer, Nummer und Labor-Nr. zentriert; Material 
   assert.equal(T.matrixMaterial('Luft (Raumluft)'), '');
 });
 
+fall('Raum-Kürzel in der Entnahmestelle werden für den Bericht ausgeschrieben (Testbericht 26.0512)', () => {
+  const m = T.bericht({ pj: D.pj({ versicherungsnehmer: '' }),
+    lk: D.lk([[1, '2026-10-08', 'Wohnung 2. OG rechts Bodenaufbau SZ Unterseite', 'Estrich', 'Estriche'], [2, '2026-10-08', 'Wohnung 2. OG rechts Bodenaufbau WZ', 'Estrich', 'Estriche'],
+      [3, '2026-10-08', 'TRH EG, Wandputz OG', 'Putz', 'Putze / Spachtelmassen']]),
+    erg: D.erg([[1, 'kein'], [2, 'kein'], [3, 'kein']]), cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form(), fotos: { P2: [{ datei: '02_P2.jpg' }] } });
+  const t = alles(m);
+  assert.match(t, /\n1 \| [^|]+ \| Wohnung 2\. OG rechts Bodenaufbau Schlafzimmer Unterseite \| Estrich \|/);
+  assert.match(t, /\n2 \| [^|]+ \| Wohnung 2\. OG rechts Bodenaufbau Wohnzimmer \| Estrich \|/);
+  assert.match(t, /\n3 \| [^|]+ \| Treppenhaus EG, Wandputz OG \| Putz \|/);
+  assert.match(t, /Abb\. 1: Estrich, Wohnung 2\. OG rechts Bodenaufbau Wohnzimmer\./);
+  assert.ok(m.hinweise.some(h => h.includes('Abkürzungen ausgeschrieben (SZ → Schlafzimmer, WZ → Wohnzimmer, TRH → Treppenhaus)')));
+  // nur ganze Wörter, genau so geschrieben; LabelKit-Text bleibt unverändert
+  assert.equal(T.raumAusschreiben('SZW, Sz, MSZ, Bad').text, 'SZW, Sz, MSZ, Bad');
+  assert.equal(T.raumAusschreiben('KiZ/GZ').text, 'Kinderzimmer/Gästezimmer');
+  // AZ = Asbestzement im Asbestbericht – bleibt stehen (Codex-Hinweis PR #8)
+  assert.equal(T.raumAusschreiben('Keller AZ-Rohr').text, 'Keller AZ-Rohr');
+  assert.equal(T.raumAusschreiben('WZ AZ-Platte').text, 'Wohnzimmer AZ-Platte');
+  assert.deepEqual(T.raumAusschreiben('').ersetzt, []);
+  // ohne Kürzel kein Hinweis
+  const m2 = T.bericht({ pj: D.pj(), lk: D.lk([[1, '2026-10-08', 'EG Flur', 'Putz', 'Putze / Spachtelmassen']]), erg: D.erg([[1, 'kein']]), cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form() });
+  assert.ok(!m2.hinweise.some(h => /Abkürzungen ausgeschrieben/.test(h)));
+});
+
 console.log(`\n${n} Fälle bestanden.`);
