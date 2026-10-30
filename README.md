@@ -13,6 +13,7 @@ Adresse: `https://kaspersebastian83-dot.github.io/berichtkit/` · aus der Projek
 | Proben: Entnahmestelle, Material (`z3`, leer → aus der Matrix), Probenahmedatum; Probenehmer (Feldbogen, nur genauer Name) | LabelKit (Asbest-Tabelle) | `*_Daten.json` – die Datei, die ResultKit übernommen hat (`auftrag.quelle`), sonst die neueste |
 | Ergebnis, Labor-Nr., Prüfbericht-Nr., KI-Wert (falls im XML) | ResultKit | `_Ergebnisse.json` |
 | Fotos zu den Proben (Probe-Nr. in FotoKit) | FotoKit | `_Bildumbenenner.json` + `Fotos/` |
+| Anlagen (Bilddokumentation, Probenplan, optional Ergebniskarte/Raumbuch/Wandansichten/Anlage Probenahme) | FotoKit, PlanKit | `Fotos/Bilddokumentation_*.pdf`, `Pläne/Probenplan *.pdf`, `Mitteilungen/*_Raumbuch_*.docx` … – siehe „Anlagen“ |
 | Namen | Projektzentrale | `<Archiv>/_Spektron-Mitarbeiter.json` |
 | Rollen, Frau/Herr (ohne Eintrag: Büro-Standard nach Nachname), Labor | BerichtKit „Einstellungen“ | `<Archiv>/_Spektron-BerichtKit.json` – die Rolle („als Sachverständige(r)“/„als Messtechniker(in)“) ist je Unterschrift vorgewählt und im Bericht änderbar |
 | Unterschriften | von Hand abgelegt | `<Archiv>/_Spektron-Unterschriften/<Kürzel>.png` |
@@ -30,7 +31,7 @@ Die Ablageorte im Projekt bestimmt das gemeinsame Modul `spektron-ordner.js` (Be
 
 ## Regeln
 
-- **Nur lesen** – BerichtKit ändert keine Projektdatei der anderen Apps. Es schreibt nur die Word-Datei nach `Mitteilungen/`
+- **Nur lesen** – BerichtKit ändert keine Projektdatei der anderen Apps (Anlagen werden nur gefunden, nie verschoben oder umbenannt). Es schreibt nur die Word-Datei nach `Mitteilungen/`
   (vorhandene Datei: Rückfrage, sonst „… (2).docx“), seine eigenen Angaben (`_BerichtKit.json`) und die Einstellungen in den Archivordner.
 - **Laborwerte und Probenbezeichnungen werden nie bearbeitet.** Ergebnistexte kommen wörtlich aus dem Prüfbericht (über ResultKit).
   Einzige Ausnahme: ein KI-Wert, der nicht in den Labordaten steht, kann aus dem PDF eingetragen werden (im Formular markiert).
@@ -46,8 +47,30 @@ Die Ablageorte im Projekt bestimmt das gemeinsame Modul `spektron-ordner.js` (Be
   Gegentest mit echten Projekten zur Sperre, Schalter `ABGLEICH_SPERRT` in `bericht-text.js`); vorläufiger Prüfbericht (dazu Kopfzeile
   „Vorläufig“); Versicherer oder Probenehmer nur angenommen.
 - **Lücken** sperren nicht – Rückfrage vor dem Speichern; die Übergabe ans Büro prüft, ob noch welche in der Word-Datei stehen.
-- Nach dem Speichern: `_BerichtKit.json` → `berichte[]` mit `anlagen` (`Laborergebnisse/<Prüfbericht>.pdf`) und `luecken`; Knopf
+- Nach dem Speichern: `_BerichtKit.json` → `berichte[]` mit `anlagen` (alle Anlage-Dateien, z. B. `Laborergebnisse/<Prüfbericht>.pdf`, `Fotos/Bilddokumentation_….pdf`), `anlagenListe` und `luecken`; Knopf
   „Ans Büro übergeben →“ öffnet `../Projektzentrale/#projekt=<Ordner>&uebergabe=Mitteilungen/<Datei>`.
+
+## Anlagen
+
+`anlagen.js` (ohne Browserteile, `node tests/anlagen.cjs`) erkennt, was im Projektordner liegt, und nummeriert in der **festen
+Hausreihenfolge**: Anlage 1 = Prüfbericht(e) (mehrere zählen hoch), dann **Bilddokumentation**, dann **Probenplan**. Das Modul kennt
+nur Arten von Anlagen; welche ein Bericht erwartet, sagt das Profil (`PROFILE.asbest`) – weitere Berichtsarten bekommen ein eigenes.
+
+| Art | Wo | Erkannt an | Veraltet, wenn … |
+|---|---|---|---|
+| Bilddokumentation | `Fotos/` | `Bilddokumentation_…pdf`, Teile `…_Teil_1_von_2.pdf` = **eine** Anlage; FotoKit ab 1.29 vermerkt die erzeugte PDF (`bilddoku`) | FotoKit: `dokuGeaendert` nach `bilddoku.erstellt` (Beschreibungen, Auswahl, Reihenfolge, Projektdaten geändert) |
+| Probenplan | `Pläne/` | `Probenplan <Ordner>.pdf` (alle Geschosse) oder `… - EG.pdf`, `… - OG.pdf` (= eine Anlage), „ (2)“ = neuere Fassung | `.probenplan` nach dem PDF gespeichert |
+| Ergebniskarte | `Pläne/` | `Probenplan … - Ergebniskarte.pdf` | wie Probenplan |
+| Raumbuch, Wandansichten, Anlage Probenahme | `Mitteilungen/` | PlanKit-Namen `<Nr>_Raumbuch_<Datum>.docx` usw. | Prüfsumme der `.probenplan` laut `_Anlagen-Protokoll.txt` ≠ jetzt; sonst Dateizeit |
+
+- Gefunden und aktuell → angehakt. **Veraltet oder unvollständig → Hinweis und nicht angehakt** (selbst anhaken geht, mit Hinweis).
+  Feste Anlagen, die fehlen, stehen grau da mit Link in die App. Ergebniskarte, Raumbuch, Wandansichten und Anlage Probenahme
+  sind optional: angeboten, nie vorgehakt, angehakt hinter dem Probenplan. „+ Weitere Datei …“ für eigene Anlagen aus dem Projektordner.
+- Die eigene Wahl gilt nur für denselben Stand (`form.anlagen[art].key`): eine neu erstellte oder inzwischen veraltete Anlage wird wieder nach der Regel vorgehakt.
+- Text: In „2. Probenahme und Untersuchung“ ein Satz „Die Entnahmestellen sind zusätzlich in der Bilddokumentation (Anlage 2) und im Probenplan (Anlage 3) dargestellt.“ – je nach Auswahl gekürzt.
+- Trägt die Bilddokumentation eine andere Anlagen-Nr. als im Bericht (FotoKit „Anlagen-Nr.“), erscheint ein Hinweis.
+- Neu gelesen beim Öffnen, wenn das Fenster wieder nach vorn kommt (z. B. aus FotoKit) und vor dem Speichern.
+- Beim Speichern: `berichte[].anlagen` = Pfade **aller** Anlage-Dateien (die Übergabe in der Projektzentrale hakt sie vor), `anlagenListe` = `{ nr, art, titel, dateien }`.
 
 ## Texte
 
@@ -61,6 +84,7 @@ Die Formatierung (A4, Arial 12, 1,5-zeilig, Deckblatt mit Logo, Kopfzeilen, „S
 
 ```
 node tests/text.cjs              # alle Berichtsvarianten (Textbausteine)
+node tests/anlagen.cjs           # Anlagen: erkennen, Hausreihenfolge, veraltet, mehrteilig
 node tests/sw.cjs                # Offline-Dateien vollständig; Leiste gleich wie LabelKit (falls ../labelkit daneben)
 node tests/spektron-ordner.cjs   # gemeinsames Modul (mit ../projektzentrale byte-gleich)
 node tests/browser.cjs           # im Browser: öffnen, Vorschau, Einstellungen, Word-Datei (Playwright)

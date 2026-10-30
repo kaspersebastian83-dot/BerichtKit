@@ -3,9 +3,10 @@
    Schreibt nur: die Word-Datei in „Mitteilungen“ und – über „Einstellungen“ – _Spektron-BerichtKit.json im Archivordner.
    Laborwerte und Probenbezeichnungen werden nie bearbeitet; fehlende Angaben erscheinen im Bericht gelb markiert. */
 'use strict';
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 const APP_DATE = '30.10.2026';
 const CHANGELOG = [
+  ['1.6.0', '30.10.2026', 'Anlagen: BerichtKit sucht im Projektordner, was als Anlage beiliegt, und nummeriert in der festen Hausreihenfolge – Anlage 1 Prüfbericht(e), dann Bilddokumentation (FotoKit, „Fotos“), dann Probenplan (PlanKit, „Pläne“). Gefunden und aktuell = angehakt; veraltet (nach dem Erstellen in FotoKit/PlanKit geändert) = Hinweis und nicht angehakt; fehlt = graue Zeile mit Link in die App. Eine Anlage aus mehreren Dateien (Bilddoku in Teilen, Plan je Geschoss) ist eine Anlage. Ergebniskarte, Raumbuch, Wandansichten und die Word-Anlage „Probenahme“ aus PlanKit werden angeboten, aber nur angehakt mitgenommen. „+ Weitere Datei …“ für eigene Anlagen. In „2. Probenahme und Untersuchung“ ein Satz mit Verweis auf Bilddokumentation und Probenplan; Hinweis, wenn die Bilddoku eine andere Anlagen-Nr. trägt. Alle Anlagen-Dateien gehen in die Übergabe ans Büro.'],
   ['1.5.0', '30.10.2026', 'Frau/Herr im Text ohne Einstellungen: Frau Dr. Pütt und Frau Jung, alle anderen aus dem Büro Herr (Einstellung geht vor; in der Unterschrift weiterhin ohne Anrede). Tabelle 1: Spalte „Probe“ nur mit der Nummer, Nummer und Labor-Nr. zentriert (samt Spaltenkopf), Textspalten linksbündig. Material: ist „Bauteil / Material“ in LabelKit leer, kommt es aus der Matrix (z. B. „Putz / Spachtelmasse“) – mit Hinweis.'],
   ['1.4.1', '30.10.2026', 'Projektprüfung vergleicht nur noch die Projektnummer: Steht im LabelKit-Feld „Projektnummer“ zusätzlich die Adresse (ältere Projekte, z. B. „26.0512 Stegerwaldstraße Leverkusen“), wird das Speichern nicht mehr fälschlich gesperrt. Eine andere Nummer sperrt weiter.'],
   ['1.4.0', '30.10.2026', 'Deckblatt „mit Versicherung“ (VN · Risiko · Versicherer) oder „ohne Versicherung“ (Auftraggeber · Schadenort) unter „Auftrag“ umstellbar – z. B. für Hausverwaltung, Sanierer oder Privatauftrag. Ohne Wahl entscheiden die Projektdaten: Versicherer eingetragen → mit; kein VN → ohne; VN da, aber der Auftraggeber ist keine Versicherung → ohne (mit Hinweis). Unterschriften: Jede Unterschrift kann jede Person sein, mit „als Sachverständige(r)“ oder „als Messtechniker(in)“ – vorgewählt nach den Einstellungen, für diesen Bericht änderbar (z. B. Messtechniker allein).'],
@@ -113,7 +114,7 @@ async function oeffnen(dir) {
   fehler('');
   const nr = (/^(\d{2})\.(\d{4})/.exec(dir.name) || []).slice(1).join('.');
   S.ordner = { name: dir.name, nr, kuerzel: '' };
-  S.quellen = []; S.thumbs = {}; S.feldbogen = null; uebergabeZeigen('');
+  S.quellen = []; S.thumbs = {}; S.feldbogen = null; S.anlagen = {}; S.anlagenVorhanden = null; uebergabeZeigen('');
   const q = (ok, text) => S.quellen.push({ ok, text });
   try {
     await archivLesen();
@@ -162,6 +163,7 @@ async function oeffnen(dir) {
     if (rf && rf.data) { S.fk = rf.data; q(true, 'Fotos mit Probennummer aus FotoKit'); } else q(false, 'Keine FotoKit-Daten – der Bericht kommt ohne Fotos.');
     fotoListeBauen();
     await formStart();
+    await anlagenLesen().catch(e => q(false, 'Anlagen nicht vollständig lesbar: ' + (e && e.message || e)));
   } catch (e) {
     fehler('Projekt konnte nicht gelesen werden: ' + (e && e.message || e));
   }
@@ -211,6 +213,67 @@ function fotoListeBauen() {
       (S.fotoListe['P' + m[1]] = S.fotoListe['P' + m[1]] || []).push({ datei, beschreibung: v.beschreibung || '', drehung: +v.drehung || 0 });
     }
   }
+}
+/* ---------- Anlagen: was liegt im Projektordner? (anlagen.js erkennt und nummeriert) ----------
+   Gelesen werden nur Namen und Dateizeiten in Fotos/, Pläne/ und Mitteilungen/, das Anlagen-Protokoll und die PlanKit-Datei
+   (Prüfsumme). Neu gelesen beim Öffnen, wenn das Fenster wieder in den Vordergrund kommt (z. B. nach FotoKit) und vor dem Speichern. */
+const PLAN_KOPIE = / \((vorher|Wiederherstellung|Speicherkandidat|Kopie)\b[^)]*\)\.probenplan$/i;   // wie mosaik-leiste.js
+async function dateienIn(dir, muster) {
+  const out = []; if (!dir) return out;
+  for await (const h of dir.values()) {
+    if (h.kind !== 'file' || /^(~\$|\.)/.test(h.name) || !muster.test(h.name)) continue;
+    try { out.push({ name: h.name, t: (await h.getFile()).lastModified }); } catch (e) { /* gerade in Arbeit */ }
+  }
+  return out;
+}
+const sha256 = async buf => [...new Uint8Array(await crypto.subtle.digest('SHA-256', buf))].map(b => b.toString(16).padStart(2, '0')).join('');
+async function pfadDa(dir, pfad) {
+  const teile = String(pfad || '').split('/').filter(Boolean); if (!teile.length) return false;
+  try { let d = dir; for (const t of teile.slice(0, -1)) d = await d.getDirectoryHandle(t); await d.getFileHandle(teile.at(-1)); return true; } catch (e) { return false; }
+}
+async function anlagenLesen() {
+  const dir = S.dir; if (!dir) return;
+  const lauf = S.anlagenLauf = (S.anlagenLauf || 0) + 1;
+  const [fo, pl, mi] = await Promise.all(['Fotos', 'Pläne', 'Mitteilungen'].map(n => SO.unter(dir, [n]).catch(() => null)));
+  const fotos = await dateienIn(fo, /\.pdf$/i), plaene = await dateienIn(pl, /\.pdf$/i), mitteilungen = await dateienIn(mi, /\.(docx?|pdf)$/i);
+  let protokoll = null;
+  const op = await SO.ort(dir, 'anlagenProtokoll').catch(() => ({}));
+  if (op.dir) try { protokoll = await (await (await op.dir.getFileHandle('_Anlagen-Protokoll.txt')).getFile()).text(); } catch (e) { /* ohne Protokoll */ }
+  let plan = null;
+  const ok = await SO.ort(dir, 'plankit').catch(() => ({}));
+  if (ok.dir) {
+    const soll = `Probenplan ${dir.name}.probenplan`.normalize('NFC'); let best = null;
+    for await (const h of ok.dir.values()) {
+      if (h.kind !== 'file' || !/\.probenplan$/i.test(h.name) || PLAN_KOPIE.test(h.name)) continue;
+      const f = await h.getFile().catch(() => null); if (!f) continue;
+      if (h.name.normalize('NFC') === soll) { best = f; break; }
+      if (!best || f.lastModified > best.lastModified) best = f;
+    }
+    if (best) plan = { name: best.name, t: best.lastModified, sha: await sha256(await best.arrayBuffer()) };
+  }
+  // FotoKit-Daten frisch: dort steht, welche Bilddoku zuletzt erstellt wurde und wann sich ihre Inhalte geändert haben
+  const of = await SO.ort(dir, 'fotokit').catch(() => ({}));
+  const rf = of.dir ? await leseJson(of.dir, '_Bildumbenenner.json').catch(() => null) : null;
+  const vorhanden = new Set();
+  for (const x of S.form.anlagenExtra || []) if (x && await pfadDa(dir, x.pfad)) vorhanden.add(x.pfad);
+  if (lauf !== S.anlagenLauf || dir !== S.dir) return;
+  if (rf && rf.data) { S.fk = rf.data; fotoListeBauen(); }
+  S.anlagen = BerichtAnlagen.erkennen({ ordnerName: dir.name, fotos, plaene, mitteilungen, protokoll, fk: S.fk, plan });
+  S.anlagenVorhanden = vorhanden;
+}
+async function anlageHinzufuegen() {
+  if (!S.dir || !window.showOpenFilePicker) return;
+  let hs; try { hs = await window.showOpenFilePicker({ multiple: true, startIn: S.dir, id: 'berichtkit-anlage' }); } catch (e) { return; }
+  const neu = [...(S.form.anlagenExtra || [])], ausserhalb = [];
+  for (const h of hs) {
+    const pfad = await S.dir.resolve(h).catch(() => null);
+    if (!pfad || !pfad.length) { ausserhalb.push(h.name); continue; }
+    const p = pfad.join('/'); if (neu.some(x => x.pfad === p)) continue;
+    neu.push({ pfad: p, bezeichnung: h.name.replace(/\.[^.]+$/, '') });
+    S.anlagenVorhanden = new Set([...(S.anlagenVorhanden || []), p]);
+  }
+  if (ausserhalb.length) alert(`Nicht im Projektordner – bitte zuerst dorthin kopieren (z. B. nach „Mitteilungen“):\n${ausserhalb.join('\n')}`);
+  setze('anlagenExtra', neu);
 }
 /** Person zu einem Namen aus dem Feldbogen – nur bei genauem Treffer (Name, Kürzel; Leerraum und Groß-/Kleinschreibung egal).
     LabelKit schlägt die Namen der Mitarbeiterliste vor; ungefähre Treffer wären geraten. */
@@ -334,7 +397,8 @@ function formLokal() { try { localStorage.setItem(S.formKey, JSON.stringify(S.fo
 
 /* ---------- Modell ---------- */
 function modell() {
-  return T.bericht({ pj: S.pj, ordner: S.ordner, lk: S.lk, erg: S.erg, cfg: S.cfg, mitarbeiter: S.mitarbeiter, fotos: S.fotoListe, feldbogen: S.feldbogen, form: S.form });
+  const da = S.anlagenVorhanden, form = { ...S.form, anlagenExtra: (S.form.anlagenExtra || []).map(x => ({ ...x, fehlt: !!da && !da.has(x.pfad) })) };
+  return T.bericht({ pj: S.pj, ordner: S.ordner, lk: S.lk, erg: S.erg, cfg: S.cfg, mitarbeiter: S.mitarbeiter, fotos: S.fotoListe, feldbogen: S.feldbogen, anlagen: S.anlagen, form });
 }
 
 /* ---------- Anzeige ---------- */
@@ -401,6 +465,7 @@ function render() {
       <td>${esc(o.label)}</td><td>${o.material ? esc(o.material) : '–'}<div class="klein">${esc(o.stelle)}</div></td><td><span class="befund unk">noch kein Ergebnis</span></td></tr>`).join('')
     : '<tr><td colspan="4" class="klein">Keine Asbestergebnisse gefunden.</td></tr>';
   $('einbauWahl').hidden = !m.proben.some(p => p.istKmf && p.whoNachgewiesen);
+  anlagenZeigen(m);
   document.querySelectorAll('input[name=einbau]').forEach(r => { r.checked = r.value === (f.einbau || 'unbekannt'); });
   // Hinweise
   $('hinweise').innerHTML = [
@@ -418,6 +483,30 @@ function render() {
   $('btnLaden').textContent = gesperrt ? 'Entwurf herunterladen' : 'Herunterladen';
   $('status').textContent = gesperrt ? `Speichern gesperrt (${m.sperren.length}) – siehe Hinweise. „Entwurf herunterladen“ geht.`
     : `Speichert als Mitteilungen/${m.dateiname}` + (m.luecken.length ? ` · ${m.luecken.length} Lücke(n) gelb markiert` : '');
+}
+const tagDE = t => { if (!t) return ''; const d = new Date(t); return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`; };
+const ZUSTAND = { veraltet: 'veraltet', unvollstaendig: 'unvollständig', unbekannt: 'Stand unbekannt', fehlt: 'fehlt' };
+function anlagenZeigen(m) {
+  const zeile = z => {
+    const fest = z.art === 'pruefbericht', sperr = fest || z.zustand === 'fehlt';
+    const dateien = z.dateien.map(d => d.split('/').pop()), app = z.app && z.app.link && S.dir
+      ? ` <a href="${esc(z.app.link)}#projekt=${encodeURIComponent(S.dir.name)}" target="${esc(z.app.ziel)}">in ${esc(z.app.app)} ${z.zustand === 'fehlt' ? 'erstellen' : 'öffnen'} ↗</a>` : '';
+    const info = [dateien.length ? esc(dateien.join(' · ')) : '', z.t ? 'Stand ' + tagDE(z.t) : ''].filter(Boolean).join(' · ');
+    const extra = z.art === 'sonstiges';
+    return `<li class="anl z-${esc(z.zustand)}${z.an ? '' : ' aus'}">
+      <label><input type="checkbox" ${extra ? `data-anl-extra="${z.index}"` : `data-anl="${esc(z.art)}" data-key="${esc(z.key || '')}"`} ${z.an ? 'checked' : ''} ${sperr || extra ? 'disabled' : ''}>
+        <span class="nr">${z.nr ? 'Anlage ' + z.nr : '–'}</span>
+        ${extra ? `<input type="text" data-anl-name="${z.index}" value="${esc(z.bezeichnung)}" placeholder="Bezeichnung im Bericht" aria-label="Bezeichnung im Bericht">` : `<span>${esc(z.titel)}</span>`}
+        ${ZUSTAND[z.zustand] ? `<span class="marke ${esc(z.zustand)}">${ZUSTAND[z.zustand]}</span>` : ''}
+        ${extra ? `<button type="button" class="klein-knopf" data-anl-weg="${z.index}" title="Aus dem Bericht nehmen (die Datei bleibt)">✕</button>` : ''}</label>
+      ${info || z.grund || app ? `<div class="klein">${info}${z.grund ? `${info ? '<br>' : ''}${esc(z.grund)}` : ''}${app}</div>` : ''}</li>`;
+  };
+  const zs = m.anlagenZeilen || [], fest = zs.filter(z => z.fest || z.art === 'pruefbericht'), opt = zs.filter(z => !z.fest && z.art !== 'pruefbericht' && z.art !== 'sonstiges'), extra = zs.filter(z => z.art === 'sonstiges');
+  $('anlagenListe').innerHTML = fest.map(zeile).join('')
+    + (opt.length ? `<li class="anl-kopf">Weitere gefundene Anlagen – nur wenn angehakt</li>${opt.map(zeile).join('')}` : '')
+    + (extra.length ? `<li class="anl-kopf">Eigene Anlagen</li>${extra.map(zeile).join('')}` : '');
+  $('anlagenInfo').textContent = `${(m.anlagenListe || []).length} im Bericht`;
+  $('btnAnlageDazu').hidden = !window.showOpenFilePicker;
 }
 function runsHtml(r) { return (Array.isArray(r) ? r : [r]).map(x => x && typeof x === 'object' ? `<span class="gap">${esc(x.gap)}</span>` : esc(x)).join(''); }
 function vorschau(m) {
@@ -487,6 +576,7 @@ async function wordBlob(m) {
   return { blob, m, fehlen };
 }
 async function speichern() {
+  await anlagenLesen().catch(() => {}); render();   // Anlagen frisch: inzwischen in FotoKit/PlanKit erstellt oder geändert?
   const knopf = $('btnErstellen'), m0 = modell();
   if (m0.sperren.length) { fehler('Nicht gespeichert – ' + m0.sperren.join(' ')); return; }   // Knopf ist dann ohnehin aus
   knopf.disabled = true; $('status').textContent = 'Word-Datei wird erstellt …'; uebergabeZeigen('');
@@ -506,8 +596,8 @@ async function speichern() {
     const zurueck = await (await fh.getFile()).arrayBuffer();
     if (zurueck.byteLength !== blob.size) throw new Error('Gespeicherte Datei ist unvollständig – bitte erneut versuchen.');
     clearTimeout(S.zustand.geplant);
-    // Protokoll: welche Prüfbericht-PDFs als Anlage dazugehören (für die Übergabe) und wie viele Lücken beim Speichern offen waren
-    await zustandSchreiben({ datei: name, am: new Date().toISOString(), von: ich(), anlagen: m.anlagenDateien, luecken: m.luecken.length })
+    // Protokoll: welche Dateien als Anlage dazugehören (für die Übergabe: Pfade im Projektordner) und wie viele Lücken beim Speichern offen waren
+    await zustandSchreiben({ datei: name, am: new Date().toISOString(), von: ich(), anlagen: m.anlagenDateien, anlagenListe: m.anlagenListe, luecken: m.luecken.length })
       .catch(e => fehler('Bericht gespeichert, Angaben dazu nicht: ' + (e && e.message || e)));
     if (window.MosaikLeiste) MosaikLeiste.aktualisieren();
     $('status').innerHTML = `<span class="ok">✓ Gespeichert: Mitteilungen/${esc(name)}</span>` + (fehlen.length ? ` · Foto(s) nicht lesbar: ${esc(fehlen.join(', '))}` : '');
@@ -524,6 +614,7 @@ function uebergabeZeigen(datei) {
 }
 async function herunterladen() {
   try {
+    await anlagenLesen().catch(() => {}); render();
     const m0 = modell(), { blob, m } = await wordBlob(m0.sperren.length ? T.alsEntwurf(m0) : m0);
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = m.dateiname; document.body.append(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
@@ -607,6 +698,18 @@ function verbinden() {
     else map[l] = el.value.trim();
     formMerken([art, l]); render();
   });
+  $('anlagenListe').addEventListener('change', e => {
+    const el = e.target;
+    if (el.dataset.anl) { S.form.anlagen = { ...(S.form.anlagen || {}), [el.dataset.anl]: { an: el.checked, key: el.dataset.key } }; formMerken(['anlagen', el.dataset.anl]); render(); }
+    else if (el.dataset.anlName !== undefined) { const x = [...(S.form.anlagenExtra || [])], i = +el.dataset.anlName; if (x[i]) { x[i] = { ...x[i], bezeichnung: el.value.trim() }; setze('anlagenExtra', x); } }
+  });
+  $('anlagenListe').addEventListener('click', e => {
+    const b = e.target.closest('[data-anl-weg]'); if (!b) return;
+    const x = [...(S.form.anlagenExtra || [])]; x.splice(+b.dataset.anlWeg, 1); setze('anlagenExtra', x);
+  });
+  $('btnAnlageDazu').onclick = anlageHinzufuegen;
+  // Zurück aus FotoKit/PlanKit: neu erstellte oder geänderte Anlagen gleich sehen
+  window.addEventListener('focus', () => { if (S.dir && !S.laedt) anlagenLesen().then(render).catch(() => {}); });
   window.addEventListener('hashchange', () => { const n = PROJEKT_URL.lesen(); if (n && (!S.dir || n !== S.dir.name)) start(); });
 }
 verbinden();

@@ -5,6 +5,7 @@
    nie erfunden. Materialnamen stehen nur im Nominativ (in Anführungszeichen oder hinter Doppelpunkt). */
 (function (root) {
 'use strict';
+const ANL = root.BerichtAnlagen || (typeof require === 'function' ? require('./anlagen.js') : null);
 
 /* ---------- kleine Helfer ---------- */
 const s = v => (v == null ? '' : String(v)).trim();
@@ -209,13 +210,14 @@ function projektSicht(pj, ordner) {
 }
 
 /* ---------- Berichtsmodell ----------
-   eingabe = { pj, ordner:{name,nr,kuerzel}, lk, erg, cfg, mitarbeiter, fotos:{label:[{datei,...}]},
+   eingabe = { pj, ordner:{name,nr,kuerzel}, lk, erg, cfg, mitarbeiter, fotos:{label:[{datei,...}]}, anlagen: BerichtAnlagen.erkennen(…),
                feldbogen:{ text, kuerzel } (Probenehmer laut LabelKit-Feldbogen, kuerzel nur bei genauem Treffer),
                form:{ datum, mitteilung, variante:'eigen'|'zugestellt', eingangsdatum, auftragsdatum, agSatz, versicherer,
                       deckblatt:'versicherung'|'direkt'|'' (leer = automatisch), probenahmedatum, probenehmer, pnQuelle:'hand'|undefined,
                       sv (1. Unterschrift), mt (2. Unterschrift), rolle1, rolle2:'sv'|'mt'|'' (leer = laut Einstellungen), labor, aus:{label:false}, kmf:{label:true},
-                      who:{label:true}, ki:{label:'25'}, foto:{label:'datei'|''}, einbau:'vor1996'|'unbekannt' } }
-   Ergebnis: { dateiname, deckblatt, kopf, kennzeilen[], abschnitte, unterschriften, anlagen, anlagenDateien[], luecken[], hinweise[],
+                      who:{label:true}, ki:{label:'25'}, foto:{label:'datei'|''}, einbau:'vor1996'|'unbekannt',
+                      anlagen:{art:{an,key}}, anlagenExtra:[{pfad,bezeichnung,fehlt}] } }
+   Ergebnis: { dateiname, deckblatt, kopf, kennzeilen[], abschnitte, unterschriften, anlagen, anlagenTeile, anlagenDateien[], anlagenListe[], anlagenZeilen[], luecken[], hinweise[],
                sperren[], probenehmerQuelle, offen[] }
    sperren: Die Daten passen nicht zusammen – dann nicht in „Mitteilungen“ speichern, nur als Entwurf herunterladen (alsEntwurf).
    Lücken sperren nicht: Die füllt der SV in Word aus; ob welche übrig sind, prüft die Übergabe ans Büro. */
@@ -328,6 +330,14 @@ function bericht(eingabe) {
   } else if (abbVerweis) {
     pr.push({ t: 'p', runs: [eine ? `Die zugestellte Probe ist in ${abbVerweis} dargestellt.` : `Die zugestellten Proben sind in ${abbVerweis} dargestellt.`] });
   }
+  /* Anlagen (anlagen.js): Prüfbericht(e) zuerst, dann Bilddokumentation und Probenplan, dann was angehakt ist */
+  const ergBerichte = e.erg && Array.isArray(e.erg.berichte) ? e.erg.berichte : [];
+  const pdfVon = nr => { const b = ergBerichte.find(x => s(x.bericht) === nr), pdf = b && b.sources && s(b.sources.pdf); return pdf ? 'Laborergebnisse/' + pdf : ''; };
+  const A = ANL.zusammenstellen({ profil: 'asbest', pruefberichte: berichtNr.map(nr => ({ nr, pdf: pdfVon(nr) })), labor, gefunden: e.anlagen || {},
+    wahl: f.anlagen, extra: f.anlagenExtra, ohneEigeneProbenahme: zugestellt });
+  hinweise.push(...A.hinweise);
+  const verweis = ANL.verweisSatz(A.nr, eine);
+  if (verweis) pr.push({ t: 'p', runs: [verweis] });
   const nrText = berichtNr.length ? liste(berichtNr.map(x => 'Nr. ' + x)) : { gap: '[Prüfbericht-Nr.]' };
   const anl = berichtNr.length <= 1 ? '(Anlage 1)' : berichtNr.length === 2 ? '(Anlagen 1 und 2)' : `(Anlagen 1 bis ${berichtNr.length})`;
   pr.push({ t: 'p', runs: [eine ? 'Die Probe wurde der ' : 'Die Proben wurden der ', L(labor, 'Labor'), ' zur Untersuchung auf Asbest übergeben. ',
@@ -393,16 +403,13 @@ function bericht(eingabe) {
   if (sv && pn && sv.kuerzel === pn.kuerzel && !f.rolle1 && !((e.cfg && e.cfg.personen) || {})[sv.kuerzel] && !zugestellt)
     hinweise.push(`${sv.name} hat die Proben genommen und unterschreibt als Sachverständige(r) – Rolle in den Einstellungen noch nicht festgelegt (Messtechniker?).`);
   [sv, pn, mt].filter((p, i, xs) => p && xs.findIndex(q => q && q.kuerzel === p.kuerzel) === i).forEach(p => { if (!p.geschlecht) hinweise.push(`${p.name}: in den Einstellungen fehlt Frau/Herr.`); });
-  // Anlagen: „Anlage n:“ | Prüfbericht Nr. … / (Labor) – zweizeilig mit hängendem Einzug; anlagen = dieselben Angaben als Fließtext
-  const anlagenTeile = (berichtNr.length ? berichtNr : ['']).map((nr, i) =>
-    ({ label: `Anlage ${i + 1}:`, zeilen: [['Prüfbericht Nr. ', L(nr, 'Prüfbericht-Nr.')], ['(', L(labor, 'Labor'), ')']] }));
-  const anlagen = anlagenTeile.map(a => [a.label + ' ', ...a.zeilen[0], ' ', ...a.zeilen[1]]);
-  // Prüfbericht-PDFs für die Übergabe ans Büro (liegen immer sichtbar in „Laborergebnisse“)
-  const ergBerichte = e.erg && Array.isArray(e.erg.berichte) ? e.erg.berichte : [], anlagenDateien = [];
-  berichtNr.forEach(nr => {
-    const b = ergBerichte.find(x => s(x.bericht) === nr), pdf = b && b.sources && s(b.sources.pdf);
-    if (pdf) anlagenDateien.push('Laborergebnisse/' + pdf); else hinweise.push(`Prüfbericht ${nr}: PDF nicht in „Laborergebnisse“ – für die Anlage bitte ablegen.`);
-  });
+  // Anlagen: „Anlage n:“ | Prüfbericht Nr. … / (Labor) – zweizeilig mit hängendem Einzug, die übrigen einzeilig; anlagen = als Fließtext
+  const anlagenTeile = A.liste.map(a => ({ label: `Anlage ${a.nr}:`, zeilen: a.zeilen }));
+  const anlagen = anlagenTeile.map(a => [a.label + ' ', ...a.zeilen.flatMap((z, i) => i ? [' ', ...z] : z)]);
+  // Dateien aller Anlagen für die Übergabe ans Büro (Pfade im Projektordner, z. B. „Laborergebnisse/…pdf“, „Fotos/…pdf“)
+  const anlagenDateien = A.liste.flatMap(a => a.dateien);
+  const anlagenListe = A.liste.map(a => ({ nr: a.nr, art: a.art, titel: a.titel, dateien: a.dateien }));
+  berichtNr.forEach(nr => { if (!pdfVon(nr)) hinweise.push(`Prüfbericht ${nr}: PDF nicht in „Laborergebnisse“ – für die Anlage bitte ablegen.`); });
   const kennzeilen = proben.some(p => p.vorlaeufig) ? [{ art: 'vorlaeufig', text: 'Vorläufig – beruht auf einem vorläufigen Prüfbericht' }] : [];
 
   const abschnitte = [
@@ -414,7 +421,7 @@ function bericht(eingabe) {
   const modell = {
     dateiname: `${+f.mitteilung || 1}._Mitteilung_${P.nr || 'Projekt'}.docx`,
     deckblatt: { titel: `Untersuchungsbericht vom ${datum}`, mitteilung, projektnummer: P.nr, betreff: betreffRuns, felder },
-    kopf, kennzeilen, abschnitte, ortDatum: `Würselen, ${datum}`, unterschriften, versicherungsfall: vfall, anlagen, anlagenTeile, anlagenDateien, proben, offen,
+    kopf, kennzeilen, abschnitte, ortDatum: `Würselen, ${datum}`, unterschriften, versicherungsfall: vfall, anlagen, anlagenTeile, anlagenDateien, anlagenListe, anlagenZeilen: A.zeilen, proben, offen,
     hinweise: [...new Set(hinweise)], sperren, probenehmerQuelle,
   };
   modell.luecken = luecken(modell);

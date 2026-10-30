@@ -18,7 +18,9 @@ const daten = {
   lk: B.lk([[1, '2026-10-16', 'Umkleide Schwimmbad', 'Fliesenkleber', 'Bituminöse Proben / Kleber'], [2, '2026-10-16', 'Dachboden', 'Dämmstoff Mineralwolle', 'Sonstige']]),
   erg: B.erg([[1, 'chrysotil'], [2, 'kmf']]),
   ma: { format: 'spektron-mitarbeiter', version: 1, personen: B.mitarbeiter },
-  fk: { app: 'Bildumbenenner', format: 1, reihenfolge: ['01_P1_Fliesenkleber.jpg'], bilder: { '01_P1_Fliesenkleber.jpg': { beschreibung: 'Fliesenkleber', probe: 'P1' }, '02_alt.jpg': { aussortiert: true, probe: 'P1' } } },
+  fk: { app: 'Bildumbenenner', format: 1, reihenfolge: ['01_P1_Fliesenkleber.jpg'], bilder: { '01_P1_Fliesenkleber.jpg': { beschreibung: 'Fliesenkleber', probe: 'P1' }, '02_alt.jpg': { aussortiert: true, probe: 'P1' } },
+    projekt: { anlage: 'Anlage 2' }, dokuGeaendert: '2026-10-30T09:00:00.000Z',
+    bilddoku: { dateien: ['Bilddokumentation_99.9001_Musterstadt_2026-10-30_Teil_1_von_2.pdf', 'Bilddokumentation_99.9001_Musterstadt_2026-10-30_Teil_2_von_2.pdf'], erstellt: '2026-10-30T10:00:00.000Z', anlage: 'Anlage 2' } },
 };
 
 (async () => {
@@ -65,6 +67,12 @@ const daten = {
       await schreib(archiv, p + '_Spektron/FotoKit/_Bildumbenenner.json', JSON.stringify(daten.fk));
       await schreib(archiv, p + 'Fotos/01_P1_Fliesenkleber.jpg', jpg);
       await schreib(archiv, p + 'Mitteilungen/1._Mitteilung_99.9001.docx', 'alt');
+      // Anlagen: Bilddoku in zwei Teilen (FotoKit), Probenplan-PDF nach der PlanKit-Datei (aktuell), Raumbuch (optional)
+      await schreib(archiv, p + '_Spektron/PlanKit/Probenplan ' + PROJEKT + '.probenplan', '{"plan":1}');
+      await new Promise(r => setTimeout(r, 30));
+      for (const t of [1, 2]) await schreib(archiv, p + `Fotos/Bilddokumentation_99.9001_Musterstadt_2026-10-30_Teil_${t}_von_2.pdf`, '%PDF-1.4 Teil ' + t);
+      await schreib(archiv, p + 'Pläne/Probenplan ' + PROJEKT + '.pdf', '%PDF-1.4 Plan');
+      await schreib(archiv, p + 'Mitteilungen/99.9001_Raumbuch_2026-10-30.docx', 'PK');
     }, { PROJEKT, daten });
 
     // Öffnen wie aus der Projektzentrale
@@ -81,6 +89,44 @@ const daten = {
     await page.waitForSelector('#vorschau figure img');
     // Labor fehlt noch → Lücke; Probenehmer ohne Frau/Herr → Hinweis
     assert.match(await page.textContent('#hinweise'), /Lücke im Bericht: \[Labor\]/);
+    // Anlagen: Prüfbericht 1, Bilddoku 2 (zwei Dateien = eine Anlage), Probenplan 3; Raumbuch angeboten, nicht angehakt
+    const anl = () => page.textContent('#anlagenListe');
+    assert.match(await anl(), /Anlage 1\s*Prüfbericht AR-999-2026-000001-01/);
+    assert.match(await anl(), /Anlage 2\s*Bilddokumentation[\s\S]*Teil_1_von_2\.pdf · Bilddokumentation_[^ ]*Teil_2_von_2\.pdf/);
+    assert.match(await anl(), /Anlage 3\s*Probenplan/);
+    assert.match(await anl(), /Weitere gefundene Anlagen[\s\S]*–\s*Raumbuch/);
+    assert.ok(!(await page.isChecked('input[data-anl="raumbuch"]')));
+    v = await page.textContent('#vorschau');
+    assert.match(v, /Die Entnahmestellen sind zusätzlich in der Bilddokumentation \(Anlage 2\) und im Probenplan \(Anlage 3\) dargestellt\./);
+    assert.match(v, /Anlage 2:\s*Bilddokumentation\s*Anlage 3:\s*Probenplan/);
+    // Bilddoku abwählen → Probenplan wird Anlage 2; Raumbuch anhaken → Anlage 3
+    await page.uncheck('input[data-anl="bilddoku"]'); await page.check('input[data-anl="raumbuch"]');
+    v = await page.textContent('#vorschau');
+    assert.match(v, /Die Lage der Entnahmestellen ist im Probenplan \(Anlage 2\) dargestellt\./);
+    assert.match(v, /Anlage 2:\s*Probenplan\s*Anlage 3:\s*Raumbuch/);
+    await page.check('input[data-anl="bilddoku"]'); await page.uncheck('input[data-anl="raumbuch"]');
+    // In FotoKit nach dem Erstellen geändert → beim Zurückkommen veraltet und abgewählt
+    await page.evaluate(async P => {
+      const p = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('Archiv')).getDirectoryHandle(P);
+      const fh = await (await (await p.getDirectoryHandle('_Spektron')).getDirectoryHandle('FotoKit')).getFileHandle('_Bildumbenenner.json');
+      const d = JSON.parse(await (await fh.getFile()).text()); d.dokuGeaendert = '2026-10-30T11:00:00.000Z';
+      const w = await fh.createWritable(); await w.write(JSON.stringify(d)); await w.close();
+    }, PROJEKT);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.waitForSelector('#anlagenListe li.z-veraltet');
+    assert.ok(!(await page.isChecked('input[data-anl="bilddoku"]')));
+    assert.match(await anl(), /veraltet[\s\S]*nach dem Erstellen in FotoKit geändert[\s\S]*in FotoKit öffnen/);
+    assert.match(await page.textContent('#vorschau'), /Anlage 2:\s*Probenplan/);
+    // wieder aktuell (neu erstellt) → wieder angehakt
+    await page.evaluate(async P => {
+      const p = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('Archiv')).getDirectoryHandle(P);
+      const fh = await (await (await p.getDirectoryHandle('_Spektron')).getDirectoryHandle('FotoKit')).getFileHandle('_Bildumbenenner.json');
+      const d = JSON.parse(await (await fh.getFile()).text()); d.bilddoku.erstellt = '2026-10-30T12:00:00.000Z';
+      const w = await fh.createWritable(); await w.write(JSON.stringify(d)); await w.close();
+    }, PROJEKT);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.waitForFunction(() => !document.querySelector('#anlagenListe li.z-veraltet'));
+    assert.ok(await page.isChecked('input[data-anl="bilddoku"]'), 'neue Fassung: wieder vorgehakt');
 
     // Einstellungen: Labor und Personen für das Büro speichern
     await page.click('#btnEinstellungen');
@@ -123,7 +169,7 @@ const daten = {
     await page.click('#btnDeckblattAuto');
     assert.ok(await page.isChecked('input[name=deckblatt][value=versicherung]')); assert.ok(!(await page.isVisible('#btnDeckblattAuto')));
 
-    if (process.env.BERICHT_AUSGABE) { await page.setViewportSize({ width: 1440, height: 1000 }); await page.evaluate(() => window.scrollTo(0, 0)); await page.waitForSelector('#mosaikLeiste .ml-step'); await page.screenshot({ path: path.join(process.env.BERICHT_AUSGABE, 'oberflaeche.png'), fullPage: false }); }
+    if (process.env.BERICHT_AUSGABE) { await page.setViewportSize({ width: 1440, height: 1000 }); await page.locator('#anlagenListe').evaluate(el => el.closest('.karte').scrollIntoView()); await page.locator('#anlagenListe').evaluate(el => el.closest('.karte')).then(() => page.locator('.karte:has(#anlagenListe)').screenshot({ path: path.join(process.env.BERICHT_AUSGABE, 'anlagen.png') })); await page.evaluate(() => window.scrollTo(0, 0)); await page.waitForSelector('#mosaikLeiste .ml-step'); await page.screenshot({ path: path.join(process.env.BERICHT_AUSGABE, 'oberflaeche.png'), fullPage: false }); }
     // Probe abwählen und wieder an
     await page.uncheck('input[data-art="aus"][data-l="P2"]');
     assert.doesNotMatch(await page.textContent('#vorschau'), /KMF/);
@@ -152,7 +198,9 @@ const daten = {
     assert.equal(zustand.format, 'spektron-bericht'); assert.equal(zustand.projekt, '99.9001');
     assert.equal(zustand.form.probenehmer, 'Mes'); assert.equal(zustand.form.einbau, 'vor1996');
     assert.deepEqual(zustand.berichte.map(b => b.datei), ['1._Mitteilung_99.9001.docx']);
-    assert.deepEqual(zustand.berichte[0].anlagen, ['Laborergebnisse/AR-999-2026-000001-01.pdf']); assert.equal(zustand.berichte[0].luecken, 0);
+    assert.deepEqual(zustand.berichte[0].anlagen, ['Laborergebnisse/AR-999-2026-000001-01.pdf', 'Fotos/Bilddokumentation_99.9001_Musterstadt_2026-10-30_Teil_1_von_2.pdf',
+      'Fotos/Bilddokumentation_99.9001_Musterstadt_2026-10-30_Teil_2_von_2.pdf', 'Pläne/Probenplan ' + PROJEKT + '.pdf']); assert.equal(zustand.berichte[0].luecken, 0);
+    assert.deepEqual(zustand.berichte[0].anlagenListe.map(a => a.nr + ' ' + a.art), ['1 pruefbericht', '2 bilddoku', '3 probenplan']);
     // Danach: „Ans Büro übergeben →“ öffnet die Projektzentrale mit vorbelegter Word-Datei
     assert.equal(await page.getAttribute('#btnUebergabe', 'href'),
       '../Projektzentrale/#projekt=' + encodeURIComponent(PROJEKT) + '&uebergabe=' + encodeURIComponent('Mitteilungen/1._Mitteilung_99.9001.docx'));

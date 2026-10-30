@@ -32,6 +32,8 @@ jobs:
           SPEKTRON_ORDNER_PFLICHT: '1'
       - name: Textbausteine (alle Berichtsvarianten)
         run: node tests/text.cjs
+      - name: Anlagen (erkennen, Hausreihenfolge, veraltet)
+        run: node tests/anlagen.cjs
       - name: LabelKit daneben holen (Spektron-Leiste byte-gleich prüfen)
         env:
           ZWEIG: ${{ github.head_ref }}
