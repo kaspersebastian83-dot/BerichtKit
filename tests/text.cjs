@@ -98,16 +98,22 @@ fall('VN ist selbst Auftraggeber, Lage vor der Adresse (wie 26.0512)', () => {
   const pj = D.pj({ auftraggeber: 'Muster Bauverein eG, Am Hang 4, 12345 Musterstadt', versicherungsnehmer: 'Muster Bauverein eG, Am Hang 4, 12345 Musterstadt',
     objekt: '2. OG rechts\nMusterweg 12\n12345 Musterstadt', zustaendig: { kuerzel: 'Neu' } });
   const lk = D.lk([[1, '2026-10-08', 'Wohnung 2. OG rechts', 'Bodenaufbau', 'Estriche']]);
-  let m = T.bericht({ pj, lk, erg: D.erg([[1, 'kein']]), cfg: D.cfg, mitarbeiter: [...D.mitarbeiter, { ordnerKuerzel: 'Neu', name: 'Nils Neu' }],
-    form: form({ probenehmer: 'Neu', sv: 'Neu', mt: '' }) });
+  // ohne Wahl: Auftraggeber ist keine Versicherung → Deckblatt ohne Versicherung, mit Hinweis zum Umstellen
+  let m = T.bericht({ pj, lk, erg: D.erg([[1, 'kein']]), cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form() });
+  assert.equal(m.versicherungsfall, false); assert.deepEqual(m.deckblatt.felder.map(f => f[0]), ['Auftraggeber:', 'Schadenort:', 'Schaden-Nr.:']);
+  assert.ok(m.hinweise.some(h => /Deckblatt ohne Versicherung \(VN eingetragen, aber der Auftraggeber ist keine Versicherung\)/.test(h)));
+  // „mit Versicherung“ gewählt: Versicherer unbekannt → Lücke
+  m = T.bericht({ pj, lk, erg: D.erg([[1, 'kein']]), cfg: D.cfg, mitarbeiter: [...D.mitarbeiter, { ordnerKuerzel: 'Neu', name: 'Nils Neu' }],
+    form: form({ probenehmer: 'Neu', sv: 'Neu', mt: '', deckblatt: 'versicherung' }) });
   const t = alles(m);
+  assert.ok(!m.hinweise.some(h => /Deckblatt ohne Versicherung/.test(h)));
   assert.deepEqual(m.deckblatt.felder[2], ['Versicherer:', [{ gap: '[Versicherer]' }]]);
   assert.ok(m.luecken.includes('[Versicherer]'));
   assert.ok(m.hinweise.some(h => /Auftraggeber und VN sind gleich/.test(h)));
   assert.match(t, /wurde unser Büro durch die Muster Bauverein eG beauftragt, im Objekt Musterweg 12, 12345 Musterstadt \(2\. OG rechts\) eine Ortsbesichtigung/);
   assert.ok(m.hinweise.some(h => /Nils Neu hat die Proben genommen und unterschreibt als Sachverständige\(r\)/.test(h)));
   assert.deepEqual(m.deckblatt.felder[1][1], ['2. OG rechts', 'Musterweg 12', '12345 Musterstadt']);   // Deckblatt bleibt wie in der Projektzentrale
-  m = T.bericht({ pj, lk, erg: D.erg([[1, 'kein']]), cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form({ versicherer: 'Beispiel Versicherung AG', agSatz: 'den Vorstand des Bauvereins' }) });
+  m = T.bericht({ pj, lk, erg: D.erg([[1, 'kein']]), cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form({ deckblatt: 'versicherung', versicherer: 'Beispiel Versicherung AG', agSatz: 'den Vorstand des Bauvereins' }) });
   assert.deepEqual(m.deckblatt.felder[2], ['Versicherer:', ['Beispiel Versicherung AG']]);
   assert.match(alles(m), /durch den Vorstand des Bauvereins beauftragt/);
 });
@@ -208,4 +214,44 @@ fall('Einzelteile: Befund, Namen, Zahlwörter', () => {
   assert.equal(T.datumDE('2026-10-05'), '05.10.2026'); assert.equal(T.datumDE('5.10.2026'), '05.10.2026');
 });
 
+fall('Deckblatt mit/ohne Versicherung: automatisch und umstellbar (Hausverwaltung, Sanierer, Privat)', () => {
+  const basis = { lk: D.lk([[1, '2026-10-16', 'Keller', 'Putz', 'Sonstige']]), erg: D.erg([[1, 'kein']]), cfg: D.cfg, mitarbeiter: D.mitarbeiter };
+  const hv = D.pj({ auftraggeber: 'Muster Hausverwaltung GmbH, Hauptstr. 5, 12345 Musterstadt' });   // VN aus dem Arbeitszettel, aber keine Versicherung
+  let m = T.bericht({ ...basis, pj: hv, form: form() });
+  assert.equal(m.versicherungsfall, false);
+  assert.deepEqual(m.deckblatt.felder, [['Auftraggeber:', ['Muster Hausverwaltung GmbH', 'Hauptstr. 5', '12345 Musterstadt']], ['Schadenort:', ['Musterweg 12', '12345 Musterstadt']], ['Schaden-Nr.:', ['BV-2026-0001']]]);
+  assert.equal(T.text(m.kopf[2]), 'AG: Muster Hausverwaltung GmbH, Hauptstr. 5, 12345 Musterstadt');
+  assert.equal(T.text(m.kopf[3]), 'Schadenort: Musterweg 12, 12345 Musterstadt');
+  assert.ok(!m.hinweise.some(h => /Versicherer angenommen/.test(h)));
+  // umgestellt auf „mit Versicherung“: Versicherer selbst eintragen (sonst würde die Hausverwaltung angenommen – mit Hinweis)
+  m = T.bericht({ ...basis, pj: hv, form: form({ deckblatt: 'versicherung', versicherer: 'Muster Assekuranz AG' }) });
+  assert.deepEqual(m.deckblatt.felder.map(f => f[0]), ['VN:', 'Risiko:', 'Versicherer:', 'Schaden-Nr.:']); assert.deepEqual(m.deckblatt.felder[2][1], ['Muster Assekuranz AG']);
+  // Versicherer in der Projektzentrale → mit Versicherung, auch wenn der Auftraggeber ein Sanierer ist
+  m = T.bericht({ ...basis, pj: D.pj({ auftraggeber: 'Muster Sanierung GmbH', versicherer: 'Beispiel Versicherung AG' }), form: form() });
+  assert.equal(m.versicherungsfall, true); assert.deepEqual(m.deckblatt.felder[2], ['Versicherer:', ['Beispiel Versicherung AG']]);
+  // … und umgekehrt „ohne“ gewählt
+  m = T.bericht({ ...basis, pj: D.pj(), form: form({ deckblatt: 'direkt' }) });
+  assert.deepEqual(m.deckblatt.felder.map(f => f[0]), ['Auftraggeber:', 'Schadenort:', 'Schaden-Nr.:']); assert.ok(!m.hinweise.some(h => /Deckblatt ohne Versicherung/.test(h)));
+  // Privatauftrag ohne VN: ohne Versicherung, kein Hinweis
+  m = T.bericht({ ...basis, pj: D.pj({ auftraggeber: 'Herr Max Muster', versicherungsnehmer: '' }), form: form() });
+  assert.equal(m.versicherungsfall, false); assert.ok(!m.hinweise.some(h => /Deckblatt/.test(h)));
+  // Erkennen von Versicherungen am Namen
+  for (const n of ['Beispiel Versicherung AG', 'SV SparkassenVersicherung', 'Allianz Versicherungs-AG', 'AXA', 'ERGO Group', 'HUK-COBURG', 'Westfälische Provinzial', 'R+V Allgemeine', 'Gothaer', 'Muster Assekuranz AG', 'VHV'])
+    assert.ok(T.istVersicherer(n), n);
+  for (const n of ['Muster Hausverwaltung GmbH', 'Muster Sanierung GmbH', 'Herr Max Muster', 'Bauverein Bergisches Heim eG', 'Haxe & Co'])
+    assert.ok(!T.istVersicherer(n), n);
+});
+
+fall('Unterschriften: Rolle je Unterschrift wählbar (Messtechniker allein, SV als zweite Unterschrift)', () => {
+  const basis = { pj: D.pj(), lk: D.lk([[1, '2026-10-16', 'Keller', 'Putz', 'Sonstige']]), erg: D.erg([[1, 'kein']]), cfg: D.cfg, mitarbeiter: D.mitarbeiter };
+  const u = f => T.bericht({ ...basis, form: form(f) }).unterschriften.map(x => x.rolle + ' ' + x.name);
+  assert.deepEqual(u({ sv: 'Mes', mt: '' }), ['Der Messtechniker Max Messer'], 'Messtechniker allein: Rolle aus den Einstellungen');
+  assert.deepEqual(u({ sv: 'Mes', mt: 'Tst' }), ['Der Messtechniker Max Messer', 'Die Sachverständige Dr. Tanja Test']);
+  assert.deepEqual(u({ sv: 'Tst', rolle1: 'mt', mt: '' }), ['Die Messtechnikerin Dr. Tanja Test'], 'SV unterschreibt diesmal als Messtechnikerin');
+  assert.deepEqual(u({ sv: 'Mes', rolle1: 'sv', mt: '' }), ['Der Sachverständige Max Messer']);
+  assert.deepEqual(u({ sv: 'Tst', mt: 'Mes', rolle2: 'sv' }), ['Die Sachverständige Dr. Tanja Test', 'Der Sachverständige Max Messer']);
+  assert.deepEqual(u({ sv: 'Tst', mt: 'Tst' }), ['Die Sachverständige Dr. Tanja Test'], 'gleiche Person nur einmal');
+  assert.deepEqual(u({ sv: 'Tst', mt: 'Mes', variante: 'zugestellt' }), ['Die Sachverständige Dr. Tanja Test'], 'zugestellt: nur eine Unterschrift');
+  assert.ok(!T.bericht({ ...basis, form: form({ sv: 'Mes', mt: '' }) }).hinweise.some(h => /unterschreibt hier aber/.test(h)));
+});
 console.log(`\n${n} Fälle bestanden.`);
