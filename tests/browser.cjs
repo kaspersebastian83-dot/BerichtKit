@@ -322,5 +322,14 @@ const daten = {
     assert.deepEqual(neuGeschrieben.form, { einbau: 'vor1996', probenehmer: 'Mes', mt: 'Mes' }, 'nur noch eigene Angaben in der Datei');
     assert.deepEqual(fehler, [], 'keine Fehler in der Konsole');
     console.log('ok – BerichtKit im Browser: öffnen, Vorschau, Einstellungen, Word-Datei in „Mitteilungen“, Angaben im Projektordner, Spektron-Leiste');
-  } catch (e) { console.log('DIALOGE', dialoge, 'FEHLER', fehler); throw e; } finally { await browser.close(); server.close(); }
-})().catch(e => { console.error(e); process.exit(1); });
+  } catch (e) {
+    console.log('DIALOGE', dialoge, 'FEHLER', fehler);
+    if (process.env.GITHUB_ACTIONS) console.log('::error title=Browsertest Seite::' + (`Status: ${await page.textContent('#status').catch(() => '?')} | Meldungen: ${await page.textContent('#meldungen').catch(() => '?')} | Fehler: ${fehler.join(' / ')} | Dialoge: ${dialoge.join(' / ')}`).slice(0, 1500).replace(/%/g, '%25').replace(/\r?\n/g, '%0A'));
+    throw e;
+  } finally { await browser.close(); server.close(); }
+})().catch(e => {
+  console.error(e);
+  // In GitHub Actions: Grund als Annotation – sichtbar in der Prüfungsübersicht, auch ohne das ganze Protokoll
+  if (process.env.GITHUB_ACTIONS) console.log('::error title=Browsertest::' + String(e && (e.stack || e.message) || e).slice(0, 1500).replace(/%/g, '%25').replace(/\r?\n/g, '%0A'));
+  process.exit(1);
+});
