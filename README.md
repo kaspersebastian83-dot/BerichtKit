@@ -59,6 +59,12 @@ Die Ablageorte im Projekt bestimmt das gemeinsame Modul `spektron-ordner.js` (Be
   Gegentest mit echten Projekten zur Sperre, Schalter `ABGLEICH_SPERRT` in `bericht-text.js`); vorläufiger Prüfbericht (dazu Kopfzeile
   „Vorläufig“); Versicherer, Probenehmer oder Unterschrift nur angenommen – je eine Meldung mit „✓ stimmt“ (`pnQuelle`, `versOk`, `svOk`).
   Unterschrift angenommen heißt: Der Zuständige ist Messtechniker(in) oder fehlt, vorgeschlagen ist die erste Sachverständige der Liste (`svVorschlag`).
+- **Stornierte Proben** (LabelKit ab 4.49.0, `storniert: {am, kuerzel, grund}` an der Asbestprobe): keine Probe mehr – nicht in Tabelle 1, nicht im Text
+  (Probenzahl, Aufzählungen, Sätze je Probe), nicht in der Probenliste, nicht im Abgleich; sie sperrt nie. Die übrigen Proben behalten ihre
+  LabelKit-Nummer (kein Neu-Durchnummerieren, Tabelle 1 z. B. 1, 2, 4). Hat der Prüfbericht trotzdem einen Wert für sie, kommt er nicht in den
+  Bericht – nur Hinweis „P3 ist in LabelKit storniert – der Laborwert (Prüfbericht …) kommt nicht in den Bericht.“
+  Ausnahme: Sind **alle** Asbestproben in LabelKit storniert und bleibt kein Ergebnis übrig, sperrt das (Datenfehler, nur Entwurf) –
+  „Alle Asbestproben in LabelKit sind storniert (P3 und P7) – ohne Probe gibt es keinen Bericht. …“; ein Bericht mit 0 Proben wäre falsch.
 - **Lücken** sperren nicht – Rückfrage vor dem Speichern; die Übergabe ans Büro prüft, ob noch welche in der Word-Datei stehen.
 - Nach dem Speichern: `_BerichtKit.json` → `berichte[]` mit `anlagen` (alle Anlage-Dateien, z. B. `Laborergebnisse/<Prüfbericht>.pdf`, `Fotos/Bilddokumentation_….pdf`), `anlagenListe` und `luecken`; Knopf
   „Ans Büro übergeben →“ öffnet `../Projektzentrale/#projekt=<Ordner>&uebergabe=Mitteilungen/<Datei>`.
