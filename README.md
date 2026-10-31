@@ -63,6 +63,8 @@ Die Ablageorte im Projekt bestimmt das gemeinsame Modul `spektron-ordner.js` (Be
   (Probenzahl, Aufzählungen, Sätze je Probe), nicht in der Probenliste, nicht im Abgleich; sie sperrt nie. Die übrigen Proben behalten ihre
   LabelKit-Nummer (kein Neu-Durchnummerieren, Tabelle 1 z. B. 1, 2, 4). Hat der Prüfbericht trotzdem einen Wert für sie, kommt er nicht in den
   Bericht – nur Hinweis „P3 ist in LabelKit storniert – der Laborwert (Prüfbericht …) kommt nicht in den Bericht.“
+  Ausnahme: Sind **alle** Asbestproben in LabelKit storniert und bleibt kein Ergebnis übrig, sperrt das (Datenfehler, nur Entwurf) –
+  „Alle Asbestproben in LabelKit sind storniert (P3 und P7) – ohne Probe gibt es keinen Bericht. …“; ein Bericht mit 0 Proben wäre falsch.
 - **Lücken** sperren nicht – Rückfrage vor dem Speichern; die Übergabe ans Büro prüft, ob noch welche in der Word-Datei stehen.
 - Nach dem Speichern: `_BerichtKit.json` → `berichte[]` mit `anlagen` (alle Anlage-Dateien, z. B. `Laborergebnisse/<Prüfbericht>.pdf`, `Fotos/Bilddokumentation_….pdf`), `anlagenListe` und `luecken`; Knopf
   „Ans Büro übergeben →“ öffnet `../Projektzentrale/#projekt=<Ordner>&uebergabe=Mitteilungen/<Datei>`.

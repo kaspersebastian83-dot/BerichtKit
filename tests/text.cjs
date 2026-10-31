@@ -313,6 +313,27 @@ fall('Stornierte Proben (LabelKit 4.49.0): nicht in Tabelle 1, Text, Abgleich; k
   assert.doesNotMatch(alles(m2), /AR-999-2026-000002-01/);
 });
 
+fall('Alle Asbestproben in LabelKit storniert: kein Bericht ohne Proben – gesperrt, nur Entwurf (Codex-Review #11)', () => {
+  const lkAlle = D.lk([[3, '2026-10-16', 'Dach', 'Wellplatte', 'Faserzementprodukte (z.B. Eternit)', D.STORNO], [7, '2026-10-16', 'Flur', 'Kleber', 'Sonstige', D.STORNO]]);
+  const SPERRE = 'Alle Asbestproben in LabelKit sind storniert (P3 und P7) – ohne Probe gibt es keinen Bericht. Gilt eine Probe doch, heb das Storno in LabelKit auf und übernimm die Ergebnisse in ResultKit erneut.';
+  // a) ältere _Ergebnisse.json (vor ResultKit 1.13): Laborwerte zu den stornierten Proben sind noch drin
+  let m = T.bericht({ pj: D.pj(), lk: lkAlle, erg: D.erg([[3, 'chrysotil'], [7, 'kein']]), cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form() });
+  assert.deepEqual(m.proben, []); assert.deepEqual(m.sperren, [SPERRE]);
+  assert.ok(!m.hinweise.some(h => /Keine Asbestergebnisse gefunden/.test(h)), 'nicht „zuerst in ResultKit übernehmen“ – die Ursache ist das Storno');
+  // b) ResultKit ab 1.13: stornierte Proben fehlen schon in _Ergebnisse.json – gleiche Sperre
+  m = T.bericht({ pj: D.pj(), lk: lkAlle, erg: D.erg([]), cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form() });
+  assert.deepEqual(m.sperren, [SPERRE]);
+  // c) eine aktive Probe übrig → normaler Bericht, keine Sperre; aktive Probe nur abgewählt → keine Storno-Sperre (deine Wahl)
+  const lkEine = D.lk([[1, '2026-10-16', 'Keller', 'Putz', 'Sonstige'], [3, '2026-10-16', 'Dach', 'Wellplatte', 'Sonstige', D.STORNO]]);
+  m = T.bericht({ pj: D.pj(), lk: lkEine, erg: D.erg([[1, 'kein']]), cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form() });
+  assert.deepEqual(m.sperren, []); assert.equal(m.proben.length, 1);
+  m = T.bericht({ pj: D.pj(), lk: lkEine, erg: D.erg([[1, 'kein']]), cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: { ...form(), aus: { P1: false } } });
+  assert.ok(!m.sperren.some(s => /storniert/.test(s)));
+  // d) LabelKit ohne Asbestproben (z. B. nur PAK-Projekt) bleibt wie bisher: keine Storno-Sperre
+  m = T.bericht({ pj: D.pj(), lk: D.lk([]), erg: D.erg([]), cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form() });
+  assert.ok(!m.sperren.some(s => /storniert/.test(s)));
+});
+
 fall('Vorläufiger Prüfbericht: Hinweis und Kopfzeile, keine Sperre; Anlagen-PDFs für die Übergabe', () => {
   const e = D.erg([[1, 'chrysotil']]); e.berichte[0].vorlaeufig = true;
   const m = T.bericht({ pj: D.pj(), lk: D.lk([[1, '2026-10-16', 'Keller', 'Putz', 'Sonstige']]), erg: e, cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form() });

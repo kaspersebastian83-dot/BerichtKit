@@ -213,7 +213,9 @@ function probenSammeln(erg, lk) {
   out.sort((a, b) => (a.nr || 0) - (b.nr || 0));
   const offen = [...lkm].filter(([k]) => !out.some(p => p.label === k)).map(([label, l]) => ({ label, nr: l.nr, stelle: l.stelle, material: l.material }));
   storniert.sort((a, b) => (a.nr || 0) - (b.nr || 0));
-  return { proben: out, offen, storniert };
+  // nurStorniert: LabelKit hat Asbestproben, aber alle sind storniert (dann gibt es keinen Bericht – siehe bericht())
+  const nurStorniert = !lkm.size && lks.size ? [...lks.values()].map(l => 'P' + l.nr).sort((a, b) => a.slice(1) - b.slice(1)) : [];
+  return { proben: out, offen, storniert, nurStorniert };
 }
 
 /* ---------- Projektdaten ---------- */
@@ -264,11 +266,15 @@ function projektSicht(pj, ordner) {
 function bericht(eingabe) {
   const e = eingabe || {}, f = e.form || {}, P = projektSicht(e.pj, e.ordner);
   const hinweise = [], sperren = [], hinweisAktionen = {};   // hinweisAktionen: { <Hinweistext>: { app, link, ziel, was } | { einstellungen: true } }
-  const { proben: alle, offen: offenAlle, storniert } = probenSammeln(e.erg, e.lk);
+  const { proben: alle, offen: offenAlle, storniert, nurStorniert } = probenSammeln(e.erg, e.lk);
   const proben = alle.filter(p => !(f.aus && f.aus[p.label] === false));
   const offen = offenAlle.map(o => ({ ...o, aus: !!(f.aus && f.aus[o.label] === false) }));
   // In LabelKit storniert, aber noch ein Laborwert im Prüfbericht: nicht im Bericht, nicht im Abgleich, sperrt nicht – nur ein Hinweis
   storniert.forEach(x => hinweise.push(`${x.label} ist in LabelKit storniert – der Laborwert${x.bericht ? ` (Prüfbericht ${x.bericht})` : ''} kommt nicht in den Bericht.`));
+  // Alle LabelKit-Asbestproben storniert und kein Ergebnis übrig: ein Bericht ohne Proben (0 Materialproben, leere Tabelle 1)
+  // wäre falsch – Datenfehler, nur Entwurf. (Mit ResultKit ab 1.13 kommen Werte stornierter Proben gar nicht erst an.)
+  const alleStorniert = !alle.length && nurStorniert.length > 0;
+  if (alleStorniert) sperren.push(`Alle Asbestproben in LabelKit sind storniert (${liste(nurStorniert)}) – ohne Probe gibt es keinen Bericht. Gilt eine Probe doch, heb das Storno in LabelKit auf und übernimm die Ergebnisse in ResultKit erneut.`);
   // LabelKit-Datei eines anderen Projekts: nichts daraus darf in den Bericht
   const lkNr = s(e.lk && e.lk.projekt && e.lk.projekt.nr), nr = s(e.ordner && e.ordner.nr) || P.nr;
   if (lkNr && nr && !gleichesProjekt(lkNr, nr)) sperren.push(`Die LabelKit-Datei gehört zu Projekt ${lkNr}, nicht zu ${nr} – in LabelKit/ResultKit prüfen.`);
@@ -293,7 +299,7 @@ function bericht(eingabe) {
   const ohneAbgleich = proben.filter(p => p.abgleich.ok === null);
   if (ohneAbgleich.length) hinweise.push(`Entnahmestelle nicht mit dem Prüfbericht abgeglichen (${ohneAbgleich.map(p => p.label).join(', ')}): `
     + (ohneAbgleich.some(p => !p.abgleich.auftrag) ? 'ResultKit hat den LabelKit-Auftrag nicht gespeichert – in ResultKit die Ergebnisse erneut übernehmen.' : 'Beschreibung fehlt (z. B. nur PDF) – bitte selbst vergleichen.'));
-  if (!proben.length) hinweise.push('Keine Asbestergebnisse gefunden – zuerst in ResultKit die Laborergebnisse übernehmen.');
+  if (!proben.length && !alleStorniert) hinweise.push('Keine Asbestergebnisse gefunden – zuerst in ResultKit die Laborergebnisse übernehmen.');
 
   const n = proben.length, eine = n === 1;
   const kmfProben = proben.filter(p => p.istKmf);
