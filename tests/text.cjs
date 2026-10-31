@@ -269,6 +269,50 @@ fall('Sperren: fremde LabelKit-Datei, LabelKit-Probe ohne Ergebnis (abwählbar);
   assert.equal(m.dateiname, '1._Mitteilung_99.9001.docx', 'Modell selbst unverändert');
 });
 
+fall('Stornierte Proben (LabelKit 4.49.0): nicht in Tabelle 1, Text, Abgleich; keine Sperre; Nummern bleiben; Laborwert nur als Hinweis', () => {
+  // P2 storniert, hat aber noch einen (positiven) Laborwert und eine abweichende Entnahmestelle; P4 storniert, ohne Ergebnis
+  const lk = { ...D.lk([[1, '2026-10-16', 'Keller', 'Putz', 'Putze / Spachtelmassen'], [2, '2026-10-16', 'Dach', 'Wellplatte', 'Faserzementprodukte (z.B. Eternit)', D.STORNO],
+    [3, '2026-10-16', 'Flur', 'Fliesenkleber', 'Bituminöse Proben / Kleber'], [4, '2026-10-17', 'Garage', 'Dichtschnur', 'Schnüre', D.STORNO]]), nrSchutz: 1 };
+  const e = D.berichtDesc(D.auftrag(D.erg([[1, 'kein'], [2, 'chrysotil'], [3, 'kein']]), [[1, 'Keller, Putz'], [2, 'Dach, Wellplatte'], [3, 'Flur, Fliesenkleber']]),
+    { P1: 'Keller, Putz', P2: 'Garten, Wellplatte', P3: 'Flur, Fliesenkleber' });
+  const m = T.bericht({ pj: D.pj(), lk, erg: e, cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form(), fotos: { P2: [{ datei: '02_P2_Wellplatte.jpg' }] } });
+  const t = alles(m), tab = m.abschnitte.flatMap(a => a.inhalt).find(x => x.t === 'tab');
+  // Tabelle 1: nur die übrigen Proben, mit ihrer LabelKit-Nummer (nicht neu durchnummeriert)
+  assert.deepEqual(tab.zeilen.map(z => z[0]), ['1', '3']);
+  assert.deepEqual(tab.zeilen.map(z => z[2]), ['Keller', 'Flur']);
+  assert.match(t, /Tabelle 1: Entnommene Proben und Ergebnisse/);
+  // Text: Zählungen und Sätze ohne die stornierten Proben
+  assert.match(t, /im Objekt zwei Materialproben entnommen\. Die Entnahmestellen sind in Tabelle 1 aufgeführt\./);
+  assert.match(t, /In keiner der zwei Proben wurde Asbest nachgewiesen \(Tabelle 1\)\./);
+  assert.match(t, /Bei den untersuchten Materialien handelt es sich nicht um asbesthaltige Materialien\./);
+  assert.doesNotMatch(t, /Probe 2|Probe 4|Wellplatte|Dichtschnur|Chrysotil|Garage|Abb\. /);
+  assert.doesNotMatch(t, /17\.10\.2026/, 'Probenahmedatum der stornierten Probe zählt nicht');
+  assert.deepEqual(m.proben.map(p => p.label), ['P1', 'P3']);
+  // keine Sperre, nichts offen, kein Abgleich für die stornierte Probe
+  assert.deepEqual(m.sperren, []);
+  assert.deepEqual(m.offen, []);
+  assert.ok(!m.hinweise.some(h => /Entnahmestelle/.test(h)), 'kein Abgleich (P2 wiche ab)');
+  assert.ok(!m.hinweise.some(h => /P4|Probe 4/.test(h)), 'storniert ohne Ergebnis: still');
+  // Laborwert zur stornierten Probe: nur ein Hinweis, der Wert kommt nicht in den Bericht
+  assert.deepEqual(m.storniert.map(x => x.label), ['P2']);
+  assert.ok(m.hinweise.includes('P2 ist in LabelKit storniert – der Laborwert (Prüfbericht AR-999-2026-000001-01) kommt nicht in den Bericht.'));
+  assert.equal(T.text(m.anlagen[0]), 'Anlage 1: Prüfbericht Nr. AR-999-2026-000001-01 (Eurofins Beispiel-Labor GmbH)', 'Prüfbericht mit den übrigen Proben bleibt Anlage');
+  // Probenliste in der App (probenSammeln) bietet die stornierte Probe nicht an
+  assert.deepEqual(T.probenSammeln(e, lk).proben.map(p => p.label), ['P1', 'P3']);
+  // storniert: true (vereinfachte Angabe) zählt genauso; ohne LabelKit-Storno bleibt alles wie bisher
+  const lkTrue = D.lk([[1, '2026-10-16', 'Keller', 'Putz', 'Sonstige'], [2, '2026-10-16', 'Dach', 'Wellplatte', 'Sonstige', { storniert: true }]]);
+  let m2 = T.bericht({ pj: D.pj(), lk: lkTrue, erg: D.erg([[1, 'kein']]), cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form() });
+  assert.deepEqual(m2.sperren, [], 'stornierte Probe ohne Ergebnis sperrt nicht'); assert.deepEqual(m2.offen, []);
+  assert.match(alles(m2), /im Objekt eine Materialprobe entnommen/);
+  assert.equal(T.istStorniert({ storniert: { am: 'x' } }), true); assert.equal(T.istStorniert({ storniert: null }), false); assert.equal(T.istStorniert({}), false);
+  // Ein Prüfbericht nur mit der stornierten Probe wird keine Anlage
+  const e3 = D.erg([[1, 'kein']]); e3.berichte.push({ ...D.erg([[2, 'chrysotil']], 'AR-999-2026-000002-01').berichte[0], id: 'b2' });
+  m2 = T.bericht({ pj: D.pj(), lk: lkTrue, erg: e3, cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form() });
+  assert.deepEqual(m2.anlagenTeile.filter(a => /Prüfbericht/.test(T.text(a.zeilen[0]))).map(a => T.text(a.zeilen[0])), ['Prüfbericht Nr. AR-999-2026-000001-01']);
+  assert.ok(m2.hinweise.includes('P2 ist in LabelKit storniert – der Laborwert (Prüfbericht AR-999-2026-000002-01) kommt nicht in den Bericht.'));
+  assert.doesNotMatch(alles(m2), /AR-999-2026-000002-01/);
+});
+
 fall('Vorläufiger Prüfbericht: Hinweis und Kopfzeile, keine Sperre; Anlagen-PDFs für die Übergabe', () => {
   const e = D.erg([[1, 'chrysotil']]); e.berichte[0].vorlaeufig = true;
   const m = T.bericht({ pj: D.pj(), lk: D.lk([[1, '2026-10-16', 'Keller', 'Putz', 'Sonstige']]), erg: e, cfg: D.cfg, mitarbeiter: D.mitarbeiter, form: form() });

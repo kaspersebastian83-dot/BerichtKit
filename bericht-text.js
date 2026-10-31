@@ -170,21 +170,29 @@ function raumAusschreiben(v) {
   const text = s(v).replace(RAUM_RE, k => { ersetzt.push(k); return RAUM_KUERZEL[k]; });
   return { text, ersetzt };
 }
-/** LabelKit-Asbestproben nach Label „P<n>“ (Nummer wie LabelKit: _nr, sonst id) */
+/** In LabelKit storniert (ab 4.49.0: storniert = {am, kuerzel, grund})? Jede Angabe zählt, auch ein einfaches true.
+    Stornierte Proben sind keine Proben mehr: nicht anbieten, nicht zählen, nicht abgleichen – die Nummer bleibt aber vergeben,
+    die übrigen Proben behalten ihre LabelKit-Nummer (keine Lücke schließen). */
+const istStorniert = p => !!(p && p.storniert);
+/** LabelKit-Asbestproben nach Label „P<n>“ (Nummer wie LabelKit: _nr, sonst id) → { aktiv, storniert } (je Map Label → Probe).
+    Gäbe es eine Nummer aktiv und storniert zugleich, gilt die aktive. */
 function labelkitAsbest(lk) {
-  const m = new Map();
+  const aktiv = new Map(), storniert = new Map();
   for (const p of (lk && Array.isArray(lk.asbestProben) ? lk.asbestProben : [])) {
+    if (!p) continue;
     const n = p._nr != null && p._nr !== '' ? +p._nr : +p.id; if (!n) continue;
-    m.set('P' + n, { nr: n, datum: s(p.datum), stelle: s(p.z2), material: s(p.z3), matrix: s(p.matrix) });
+    (istStorniert(p) ? storniert : aktiv).set('P' + n, { nr: n, datum: s(p.datum), stelle: s(p.z2), material: s(p.z3), matrix: s(p.matrix) });
   }
-  return m;
+  for (const k of aktiv.keys()) storniert.delete(k);
+  return { aktiv, storniert };
 }
 /** Alle Proben mit Asbest- oder KMF-Ergebnis aus _Ergebnisse.json, angereichert mit LabelKit.
     abgleich: Beschreibung aus dem LabelKit-Auftrag (auftrag.proben[].desc, wie ResultKit ihn übernommen hat) gegen die aus dem
     Prüfbericht (berichte[].proben[].desc) – ok: true/false, null = nicht abgleichbar (kein Auftrag oder kein Text).
-    offen: LabelKit-Asbestproben ohne Ergebnis. */
+    offen: LabelKit-Asbestproben ohne Ergebnis (stornierte nie).
+    storniert: Laborwerte zu Proben, die in LabelKit storniert sind – nicht im Bericht, nicht im Abgleich, nur als Hinweis. */
 function probenSammeln(erg, lk) {
-  const lkm = labelkitAsbest(lk), out = [], gesehen = new Set();
+  const { aktiv: lkm, storniert: lks } = labelkitAsbest(lk), out = [], storniert = [], gesehen = new Set();
   const berichte = erg && Array.isArray(erg.berichte) ? erg.berichte : [];
   const auftrag = erg && erg.auftrag && Array.isArray(erg.auftrag.proben) ? new Map(erg.auftrag.proben.filter(a => a && a.label).map(a => [s(a.label), a])) : null;
   for (const b of berichte) for (const p of (b.proben || [])) {
@@ -193,6 +201,7 @@ function probenSammeln(erg, lk) {
     if (!(p.typ === 'Asbest' || befund || kmf.ki || kmf.who)) continue;
     const label = s(p.label) || (PNR(p.ref) ? 'P' + PNR(p.ref) : s(p.ref));
     if (gesehen.has(label + '|' + b.bericht)) continue; gesehen.add(label + '|' + b.bericht);
+    if (lks.has(label)) { storniert.push({ label, nr: lks.get(label).nr, ref: s(p.ref), labNr: s(p.labNr), bericht: s(b.bericht || p.bericht) }); continue; }
     const l = lkm.get(label) || {}, a = auftrag && auftrag.get(label);
     const abgleich = { labelkit: a ? tidy(a.desc) : '', bericht: tidy(p.desc), auftrag: !!auftrag };
     abgleich.ok = abgleich.labelkit && abgleich.bericht ? !beschreibungWeichtAb(a.desc, p.desc, s(p.art)) : null;
@@ -203,7 +212,8 @@ function probenSammeln(erg, lk) {
   }
   out.sort((a, b) => (a.nr || 0) - (b.nr || 0));
   const offen = [...lkm].filter(([k]) => !out.some(p => p.label === k)).map(([label, l]) => ({ label, nr: l.nr, stelle: l.stelle, material: l.material }));
-  return { proben: out, offen };
+  storniert.sort((a, b) => (a.nr || 0) - (b.nr || 0));
+  return { proben: out, offen, storniert };
 }
 
 /* ---------- Projektdaten ---------- */
@@ -247,15 +257,18 @@ function projektSicht(pj, ordner) {
                       who:{label:true}, ki:{label:'25'}, foto:{label:'datei'|''}, einbau:'vor1996'|'unbekannt',
                       anlagen:{art:{an,key}}, anlagenExtra:[{pfad,bezeichnung,fehlt}] } }
    Ergebnis: { dateiname, deckblatt, kopf, kennzeilen[], abschnitte, unterschriften, anlagen, anlagenTeile, anlagenDateien[], anlagenListe[], anlagenZeilen[], luecken[], hinweise[],
-               sperren[], probenehmerQuelle, versichererQuelle, svQuelle, annahmen[{id,text,wert}], hinweisAktionen, offen[] }
+               sperren[], probenehmerQuelle, versichererQuelle, svQuelle, annahmen[{id,text,wert}], hinweisAktionen, offen[], storniert[{label,nr,ref,labNr,bericht}] }
+   In LabelKit stornierte Asbestproben (storniert) zählen nirgends: nicht in Tabelle 1, Text, Abgleich, offen oder sperren.
    sperren: Die Daten passen nicht zusammen – dann nicht in „Mitteilungen“ speichern, nur als Entwurf herunterladen (alsEntwurf).
    Lücken sperren nicht: Die füllt der SV in Word aus; ob welche übrig sind, prüft die Übergabe ans Büro. */
 function bericht(eingabe) {
   const e = eingabe || {}, f = e.form || {}, P = projektSicht(e.pj, e.ordner);
   const hinweise = [], sperren = [], hinweisAktionen = {};   // hinweisAktionen: { <Hinweistext>: { app, link, ziel, was } | { einstellungen: true } }
-  const { proben: alle, offen: offenAlle } = probenSammeln(e.erg, e.lk);
+  const { proben: alle, offen: offenAlle, storniert } = probenSammeln(e.erg, e.lk);
   const proben = alle.filter(p => !(f.aus && f.aus[p.label] === false));
   const offen = offenAlle.map(o => ({ ...o, aus: !!(f.aus && f.aus[o.label] === false) }));
+  // In LabelKit storniert, aber noch ein Laborwert im Prüfbericht: nicht im Bericht, nicht im Abgleich, sperrt nicht – nur ein Hinweis
+  storniert.forEach(x => hinweise.push(`${x.label} ist in LabelKit storniert – der Laborwert${x.bericht ? ` (Prüfbericht ${x.bericht})` : ''} kommt nicht in den Bericht.`));
   // LabelKit-Datei eines anderen Projekts: nichts daraus darf in den Bericht
   const lkNr = s(e.lk && e.lk.projekt && e.lk.projekt.nr), nr = s(e.ordner && e.ordner.nr) || P.nr;
   if (lkNr && nr && !gleichesProjekt(lkNr, nr)) sperren.push(`Die LabelKit-Datei gehört zu Projekt ${lkNr}, nicht zu ${nr} – in LabelKit/ResultKit prüfen.`);
@@ -469,7 +482,7 @@ function bericht(eingabe) {
   const modell = {
     dateiname: `${+f.mitteilung || 1}._Mitteilung_${P.nr || 'Projekt'}.docx`,
     deckblatt: { titel: `Untersuchungsbericht vom ${datum}`, mitteilung, projektnummer: P.nr, betreff: betreffRuns, felder },
-    kopf, kennzeilen, abschnitte, ortDatum: `Würselen, ${datum}`, unterschriften, versicherungsfall: vfall, anlagen, anlagenTeile, anlagenDateien, anlagenListe, anlagenZeilen: A.zeilen, proben, offen,
+    kopf, kennzeilen, abschnitte, ortDatum: `Würselen, ${datum}`, unterschriften, versicherungsfall: vfall, anlagen, anlagenTeile, anlagenDateien, anlagenListe, anlagenZeilen: A.zeilen, proben, offen, storniert,
     hinweise: [...new Set(hinweise)], hinweisAktionen, sperren, probenehmerQuelle, versichererQuelle, svQuelle,
     // Annahmen, die mit „✓ stimmt“ bestätigt werden: je eine Meldung (Hinweisliste, am Feld nur „angenommen – bitte prüfen“)
     annahmen: [['probenehmer', probenehmerQuelle], ['versicherer', versichererQuelle], ['sv', svQuelle]]
@@ -503,7 +516,7 @@ function luecken(m) {
 /** Runs → reiner Text (Lücken in eckigen Klammern) */
 const text = runs => (Array.isArray(runs) ? runs : [runs]).map(r => (r && typeof r === 'object' ? r.gap : String(r == null ? '' : r))).join('');
 
-const API = { VERSION: 1, bericht, istVersicherer, svVorschlag, rolleFestgelegt, alsEntwurf, beschreibungKey, beschreibungWeichtAb, asbestBefund, kmfWerte, person, anredeStandard, rollentext, namensteile, matrixMaterial, raumAusschreiben, datumDE, zeilen, liste, zahlwort, probenSammeln, projektSicht, projektNummer, gleichesProjekt, text, mitArtikel, objektImSatz };
+const API = { VERSION: 1, bericht, istStorniert, istVersicherer, svVorschlag, rolleFestgelegt, alsEntwurf, beschreibungKey, beschreibungWeichtAb, asbestBefund, kmfWerte, person, anredeStandard, rollentext, namensteile, matrixMaterial, raumAusschreiben, datumDE, zeilen, liste, zahlwort, probenSammeln, projektSicht, projektNummer, gleichesProjekt, text, mitArtikel, objektImSatz };
 if (typeof module === 'object' && module.exports) module.exports = API;
 root.BerichtText = API;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

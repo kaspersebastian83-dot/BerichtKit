@@ -6,8 +6,9 @@ const pj = (o = {}) => ({
   auftragsdatum: '2026-10-05', versicherungsnehmer: 'Muster Hausverwaltung GmbH, Hauptstr. 5, 12345 Musterstadt',
   zustaendig: { kuerzel: 'Tst' }, ...o,
 });
+/** LabelKit-Datei; je Asbestprobe [nr, datum, z2, z3, matrix, extra] – extra z. B. STORNO (LabelKit ab 4.49.0) */
 const lk = (proben) => ({ version: '4.46.0', projekt: { nr: '99.9001' }, ui: {}, proben: [], chloridProben: [], sonstigeProben: [],
-  asbestProben: proben.map(([nr, datum, z2, z3, matrix]) => ({ id: nr, _nr: nr, datum, z1: '99.9001', z2, z3, z4: 'fest gebunden', zustand: 'intakt', matrix, cm2: '', notiz: '' })),
+  asbestProben: proben.map(([nr, datum, z2, z3, matrix, extra]) => ({ id: nr, _nr: nr, datum, z1: '99.9001', z2, z3, z4: 'fest gebunden', zustand: 'intakt', matrix, cm2: '', notiz: '', ...extra })),
   feldprotokolle: [] });
 const werte = {
   chrysotil: [{ p: 'Asbestgehalt', r: '5 - 20', u: '%', nwg: '1 %' }, { p: 'Asbestart', r: 'Chrysotil', u: '', nwg: '1 %' },
@@ -24,9 +25,11 @@ const auftrag = (e, proben, quelle = '99.9001_16.10.2026_Daten.json') => ({ ...e
   proben: proben.map(([nr, desc]) => ({ label: 'P' + nr, typ: 'Asbest', ref: 'Probe ' + nr, desc })) } });
 /** Beschreibung im Prüfbericht setzen: { P1: 'Text' } */
 const berichtDesc = (e, map) => { for (const b of e.berichte) for (const p of b.proben) if (p.label in map) p.desc = map[p.label]; return e; };
+/** Stornierte Probe wie LabelKit 4.49.0 sie schreibt: Nummer fest, storniert mit Datum, Kürzel, Grund */
+const STORNO = { nrFest: { am: '2026-10-16T09:00:00.000Z', anlass: 'Etiketten' }, storniert: { am: '2026-10-17T08:00:00.000Z', kuerzel: 'Mes', grund: 'doppelt beprobt' } };
 const mitarbeiter = [{ ordnerKuerzel: 'Tst', appKuerzel: 'TST', name: 'Dr. Tanja Test', aktiv: true },
   { ordnerKuerzel: 'Mes', appKuerzel: 'MES', name: 'Max Messer', aktiv: true },
   { ordnerKuerzel: 'Vom', appKuerzel: 'VOM', name: 'Paul vom Beispiel', aktiv: true }];
 const cfg = { format: 'spektron-berichtkit', version: 1, labor: 'Eurofins Beispiel-Labor GmbH',
   personen: { Tst: { rolle: 'sv', geschlecht: 'w' }, Mes: { rolle: 'mt', geschlecht: 'm' }, Vom: { rolle: 'sv', geschlecht: 'm' } } };
-module.exports = { pj, lk, erg, auftrag, berichtDesc, werte, mitarbeiter, cfg };
+module.exports = { pj, lk, erg, STORNO, auftrag, berichtDesc, werte, mitarbeiter, cfg };

@@ -2,7 +2,7 @@
 // nachgebaut – mit erfundenen Daten. Geprüft: Öffnen über #projekt=, Vorschau, Einstellungen, Word-Datei in „Mitteilungen“.
 // node tests/browser.cjs [chromium]   (Playwright wird in CI installiert; lokal reicht ein vorhandenes playwright)
 // Mit BERICHT_AUSGABE=<Ordner> wird die erzeugte Word-Datei dort abgelegt (zum Ansehen).
-const assert = require('node:assert/strict'), http = require('node:http'), fs = require('node:fs'), path = require('node:path');
+const assert = require('node:assert/strict'), http = require('node:http'), fs = require('node:fs'), path = require('node:path'), zlib = require('node:zlib');
 const { chromium } = require('playwright');
 const B = require('./daten/beispiel.cjs');
 const ROOT = path.join(__dirname, '..');
@@ -13,10 +13,25 @@ const server = http.createServer((q, r) => {
   r.writeHead(200, { 'content-type': TYP[path.extname(p)] || 'application/octet-stream' }); fs.createReadStream(p).pipe(r);
 });
 const PROJEKT = '99.9001 Musterweg Musterstadt Tst';
+/** Eine Datei aus einem ZIP lesen (Word-Datei → word/document.xml) – ohne Bibliothek */
+function zipDatei(buf, name) {
+  const eocd = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06])); let p = buf.readUInt32LE(eocd + 16);
+  for (let i = 0, n = buf.readUInt16LE(eocd + 10); i < n; i++) {
+    const methode = buf.readUInt16LE(p + 10), groesse = buf.readUInt32LE(p + 20), lName = buf.readUInt16LE(p + 28), ofs = buf.readUInt32LE(p + 42);
+    if (buf.toString('utf8', p + 46, p + 46 + lName) === name) {
+      const start = ofs + 30 + buf.readUInt16LE(ofs + 26) + buf.readUInt16LE(ofs + 28), daten = buf.subarray(start, start + groesse);
+      return (methode === 8 ? zlib.inflateRawSync(daten) : daten).toString('utf8');
+    }
+    p += 46 + lName + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
+  }
+  return null;
+}
 const daten = {
   pj: B.pj(),
-  lk: B.lk([[1, '2026-10-16', 'Umkleide Schwimmbad', 'Fliesenkleber', 'Bituminöse Proben / Kleber'], [2, '2026-10-16', 'Dachboden', 'Dämmstoff Mineralwolle', 'Sonstige']]),
-  erg: B.erg([[1, 'chrysotil'], [2, 'kmf']]),
+  // P3 in LabelKit storniert (4.49.0), der Prüfbericht hat trotzdem einen Wert dafür
+  lk: { ...B.lk([[1, '2026-10-16', 'Umkleide Schwimmbad', 'Fliesenkleber', 'Bituminöse Proben / Kleber'], [2, '2026-10-16', 'Dachboden', 'Dämmstoff Mineralwolle', 'Sonstige'],
+    [3, '2026-10-16', 'Heizungskeller', 'Rohrisolierung', 'Rohrisolierungen (Gips-Basis)', B.STORNO]]), nrSchutz: 1 },
+  erg: B.erg([[1, 'chrysotil'], [2, 'kmf'], [3, 'kein']]),
   ma: { format: 'spektron-mitarbeiter', version: 1, personen: B.mitarbeiter },
   fk: { app: 'Bildumbenenner', format: 1, reihenfolge: ['01_P1_Fliesenkleber.jpg'], bilder: { '01_P1_Fliesenkleber.jpg': { beschreibung: 'Fliesenkleber', probe: 'P1' }, '02_alt.jpg': { aussortiert: true, probe: 'P1' } },
     projekt: { anlage: 'Anlage 2' }, dokuGeaendert: '2026-10-30T09:00:00.000Z',
@@ -96,6 +111,13 @@ const daten = {
     assert.match(v, /Kanzerogenitätsindex von KI = 26 aus/);
     assert.match(v, /Abb\. 1: Fliesenkleber, Umkleide Schwimmbad\./);
     await page.waitForSelector('#vorschau figure img');
+    // Stornierte Probe P3: nicht angeboten, nicht im Bericht, sperrt nicht – nur der Hinweis zum Laborwert
+    assert.equal(await page.textContent('#probenInfo'), '2 von 2 im Bericht');
+    assert.doesNotMatch(await page.textContent('#probenListe'), /Probe 3|Heizungskeller|Rohrisolierung/);
+    assert.doesNotMatch(v, /Heizungskeller|Rohrisolierung|999-2026-0000103/);
+    assert.match(await page.textContent('#hinweise'), /P3 ist in LabelKit storniert – der Laborwert \(Prüfbericht AR-999-2026-000001-01\) kommt nicht in den Bericht\./);
+    assert.doesNotMatch(await page.textContent('#hinweise'), /Gesperrt/);
+    assert.ok(await page.isEnabled('#btnErstellen'), 'Speichern nicht gesperrt');
     // Labor fehlt noch → Lücke; Probenehmer ohne Frau/Herr → Hinweis
     assert.match(await page.textContent('#hinweise'), /Lücke im Bericht: \[Labor\]/);
     // Versicherer nur angenommen (Auftraggeber): eine Meldung in den Hinweisen, am Feld nur „angenommen“; „✓ stimmt“ bestätigt
@@ -263,6 +285,12 @@ const daten = {
     const buf = Buffer.from(b64, 'base64');
     assert.equal(buf.subarray(0, 2).toString(), 'PK', 'Word-Datei (ZIP)');
     assert.ok(buf.length > 20000);
+    // Im Word: Tabelle 1 und Text nur mit P1 und P2 (Nummern wie LabelKit), die stornierte P3 fehlt ganz
+    const wort = zipDatei(buf, 'word/document.xml').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+    // (Labor-Nr. mit geschütztem Bindestrich – im XML ein eigenes Element)
+    assert.match(wort, /Tabelle 1: Entnommene Proben und Ergebnisse Probe Labor-Nr\. Entnahmestelle Material Ergebnis 1 999\D{1,3}2026\D{1,3}0000101 Umkleide Schwimmbad Fliesenkleber Chrysotil, 5 - 20 % 2 999\D{1,3}2026\D{1,3}0000102 Dachboden /);
+    assert.match(wort, /zwei Materialproben entnommen/);
+    assert.doesNotMatch(wort, /Heizungskeller|Rohrisolierung|0000103|Probe 3/);
     if (process.env.BERICHT_AUSGABE) { fs.mkdirSync(process.env.BERICHT_AUSGABE, { recursive: true }); fs.writeFileSync(path.join(process.env.BERICHT_AUSGABE, 'browser_1._Mitteilung_99.9001.docx'), buf); }
     // Angaben zum Bericht liegen für alle im Projektordner (_Spektron/BerichtKit/_BerichtKit.json) – auch der gespeicherte Bericht
     const zustand = await page.evaluate(async P => {
